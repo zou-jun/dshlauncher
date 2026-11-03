@@ -1,0 +1,15 @@
+# 文本文件在仓库和工作区都用 LF，避免 Windows 上 CRLF 抖动
+* text=auto eol=lf
+
+*.py text
+*.md text
+*.toml text
+*.spec text
+*.gitignore text
+
+# 二进制：不要做行尾转换与 diff
+*.ico binary
+*.exe binary
+*.dll binary
+*.pyd binary
+*.lnk binary

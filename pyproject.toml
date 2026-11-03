@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dshlauncher"
+version = "0.2.0"
+description = "DeepSeek Harness 启动器：托管 dsh web 服务并在无扩展的 Chromium 窗口里打开 UI"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = ["psutil>=6.0"]
+
+[project.scripts]
+dshlauncher = "dshlauncher.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pillow>=13.0.0",
+    "pyinstaller>=6.6",
+    "pytest>=8.0",
+    "ruff>=0.7",
+]
+
+[tool.uv]
+package = true
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+default = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dshlauncher"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+cache_dir = ".cache/pytest"
+
+[tool.ruff]
+line-length = 110
+cache-dir = ".cache/ruff"
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
