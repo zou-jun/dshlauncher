@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import os
+import subprocess
 import sys
 import unicodedata
 from datetime import datetime
@@ -72,15 +74,32 @@ def _report_error(exc: BaseException) -> None:
     if sys.stdout is not None:
         with contextlib.suppress(OSError):
             print(text, file=sys.stderr)
-        return
-    with contextlib.suppress(Exception):  # 没有 GUI 时只能放弃提示
-        import tkinter as tk
-        from tkinter import messagebox
+        if not sys.platform.startswith("linux"):
+            return
+        tty = True
+        with contextlib.suppress(Exception):
+            tty = sys.stdout.isatty()
+        if tty:
+            return
+    elif not sys.platform.startswith("linux"):
+        # Windows 窗口化 exe：没有 stdout，只能用对话框。
+        with contextlib.suppress(Exception):
+            import tkinter as tk
+            from tkinter import messagebox
 
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror("dshlauncher", text, parent=root)
-        root.destroy()
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("dshlauncher", text, parent=root)
+            root.destroy()
+        return
+
+    # Linux 从 .desktop 启动时没有终端，错误只能走桌面通知。
+    with contextlib.suppress(OSError):
+        subprocess.run(
+            ["notify-send", "--urgency=critical", "dshlauncher", text],
+            check=False,
+            timeout=5,
+        )
 
 
 def _settings(args: argparse.Namespace) -> settings_mod.Settings:
@@ -91,10 +110,37 @@ def _settings(args: argparse.Namespace) -> settings_mod.Settings:
         node=args.node,
         dsh_bin=args.dsh_bin,
         browser=args.browser,
+        ozone=args.ozone,
         profile_dir=args.profile_dir,
         dedupe=False if args.no_dedupe else None,
         start_timeout=args.start_timeout,
     )
+
+
+def _session_text() -> str:
+    if not sys.platform.startswith("linux"):
+        return sys.platform
+    session = os.environ.get("XDG_SESSION_TYPE") or "?"
+    return (
+        f"{session}  WAYLAND_DISPLAY={os.environ.get('WAYLAND_DISPLAY') or '-'}"
+        f"  DISPLAY={os.environ.get('DISPLAY') or '-'}"
+    )
+
+
+def _window_control_text(backend, ozone: str) -> str:  # noqa: ANN001 - 平台后端模块
+    if backend.supports_window_control(ozone):
+        return "可用（可枚举 / 置前 / 纠正尺寸）"
+    if sys.platform.startswith("linux"):
+        return "不可用（原生 Wayland；用 --ozone x11 可启用置前与尺寸纠正）"
+    return "不可用"
+
+
+def _tk_text() -> str:
+    try:
+        import tkinter
+    except Exception as exc:  # noqa: BLE001 - doctor 要展示失败原因
+        return f"不可用: {exc}"
+    return f"可用 (Tk {tkinter.TkVersion})"
 
 
 def _cmd_open(args: argparse.Namespace) -> int:
@@ -136,6 +182,9 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     rows: list[tuple[str, str]] = [
         ("dshlauncher", f"{__version__}  ({'frozen' if getattr(sys, 'frozen', False) else 'source'})"),
         ("平台", f"{sys.platform} / backend {backend.__name__.rsplit('.', 1)[-1]}"),
+        ("会话", _session_text()),
+        ("窗口控制", _window_control_text(backend, settings.ozone)),
+        ("tkinter", _tk_text()),
         ("Python", f"{sys.version.split()[0]}  {sys.executable}"),
         ("数据目录", str(paths.data_dir())),
         ("配置文件", f"{config}  ({'存在' if config.is_file() else '不存在，全部走默认值'})"),
@@ -218,6 +267,11 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--node", help="node 可执行文件路径")
     parser.add_argument("--dsh-bin", dest="dsh_bin", help="dsh 的 lib/bin.js 路径")
     parser.add_argument("--browser", help="chrome / edge / chromium / brave，或浏览器可执行文件路径")
+    parser.add_argument(
+        "--ozone",
+        choices=settings_mod.OZONE_MODES,
+        help="Linux 上 Chrome 的显示后端：auto（默认，交给 Chrome） / x11（XWayland，可置前）",
+    )
     parser.add_argument("--profile-dir", dest="profile_dir", help="专用浏览器配置目录")
     parser.add_argument("--no-dedupe", action="store_true", help="已有窗口时也强制新开一个")
     parser.add_argument(

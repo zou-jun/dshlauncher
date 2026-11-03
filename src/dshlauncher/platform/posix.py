@@ -1,8 +1,8 @@
-"""POSIX 后端（Linux / macOS）：分离进程可用，窗口控制尽力而为。
+"""macOS 后端：分离进程可用，窗口控制不可用。
 
-没有 Win32 那样的窗口枚举/定位 API，因此 ``find_window`` / ``work_area`` /
-``apply_rect`` / ``present`` 都是空操作；窗口尺寸交给 Chromium 的
-``--window-size`` / ``--window-position`` 参数，去重退化为"已有进程就复用"。
+Linux 走 ``linux`` 后端（X11/EWMH）；这里只处理 macOS：没有等价的窗口
+枚举/定位 API，因此 ``find_window`` / ``work_area`` / ``apply_rect`` /
+``present`` 都是空操作，窗口尺寸交给 Chromium 的 ``--window-size``。
 """
 
 from __future__ import annotations
@@ -30,6 +30,10 @@ def detach_kwargs(*, breakaway: bool = True) -> dict[str, bool]:
 def process_names(browser: str) -> set[str]:
     name = _PROCESS_NAME.get(browser)
     return {name} if name else set(_PROCESS_NAME.values())
+
+
+def supports_window_control(ozone: str | None = None) -> bool:
+    return False
 
 
 def work_area() -> Rect | None:

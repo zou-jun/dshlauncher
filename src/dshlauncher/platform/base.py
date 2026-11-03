@@ -1,6 +1,6 @@
 """平台后端契约。
 
-每个后端模块（`windows` / `posix`）都提供下面这些模块级函数：
+每个后端模块（`windows` / `linux` / `posix`）都提供下面这些模块级函数：
 
 - ``detach_kwargs()``：传给 ``subprocess.Popen`` 的分离参数
 - ``process_names(family)``：该浏览器家族的进程名集合
@@ -9,9 +9,10 @@
 - ``window_rect(hwnd)`` / ``apply_rect(hwnd, rect)``：读写窗口矩形
 - ``is_minimized(hwnd)`` / ``present(hwnd)``：最小化判定与置前
 - ``open_path(path)``：用系统默认程序打开文件
+- ``supports_window_control(ozone)``：当前会话能否枚举/移动/置前窗口
 
-窗口几何只在 Windows 上真正可控；POSIX 后端把这些函数实现为空操作，
-由 Chromium 自己的 ``--window-size`` / ``--window-position`` 决定尺寸。
+Linux 由 ``linux`` 后端用 X11/EWMH 实现；原生 Wayland 下返回 False，
+窗口尺寸交给 Chromium 的 ``--window-size``。macOS 的 ``posix`` 后端全是空操作。
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ class Backend(Protocol):
     def detach_kwargs(self, *, breakaway: bool = True) -> dict[str, int]: ...
 
     def process_names(self, browser: str) -> set[str]: ...
+
+    def supports_window_control(self, ozone: str | None = None) -> bool: ...
 
     def work_area(self) -> Rect | None: ...
 

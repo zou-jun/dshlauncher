@@ -117,7 +117,13 @@ def child_env() -> dict[str, str]:
         env["PATH"] = os.pathsep.join(entries)
     else:
         env.pop("PATH", None)
-    for name in ("_MEIPASS2", "_PYI_APPLICATION_HOME_DIR", "_PYI_ARCHIVE_FILE", "_PYI_PARENT_PROCESS_LEVEL"):
+    for name in (
+        "_MEIPASS2",
+        "_PYI_APPLICATION_HOME_DIR",
+        "_PYI_ARCHIVE_FILE",
+        "_PYI_PARENT_PROCESS_LEVEL",
+        "_PYI_LINUX_PROCESS_NAME",
+    ):
         env.pop(name, None)
     for name in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
         if name in env:

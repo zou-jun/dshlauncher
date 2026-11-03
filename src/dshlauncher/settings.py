@@ -15,6 +15,9 @@ ENV_PREFIX = "DSHLAUNCHER_"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 3080
 DEFAULT_START_TIMEOUT = 120.0
+#: Linux 上 Chrome 的显示后端：auto 交给 Chrome（Wayland 会话里是原生 Wayland），
+#: x11 强制走 XWayland（这时窗口可以枚举/移动/置前），wayland 显式要求原生。
+OZONE_MODES = ("auto", "x11", "wayland")
 
 
 @dataclass(frozen=True)
@@ -26,6 +29,7 @@ class Settings:
     node: Path | None = None
     dsh_bin: Path | None = None
     browser: str | None = None
+    ozone: str = "auto"
     profile_dir: Path = field(default_factory=paths.profile_dir)
     width_ratio: float = geometry.WIDTH_RATIO
     height_ratio: float = geometry.HEIGHT_RATIO
@@ -62,6 +66,13 @@ def _window_values() -> dict[str, Any]:
     return window if isinstance(window, dict) else {}
 
 
+def _ozone(value: Any) -> str:
+    mode = str(value).strip().lower()
+    if mode not in OZONE_MODES:
+        raise ValueError(f"ozone 只能是 {' / '.join(OZONE_MODES)}，收到 {value!r}")
+    return mode
+
+
 def _flag(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
         return value
@@ -78,6 +89,7 @@ def load(
     node: str | Path | None = None,
     dsh_bin: str | Path | None = None,
     browser: str | None = None,
+    ozone: str | None = None,
     profile_dir: str | Path | None = None,
     dedupe: bool | None = None,
     start_timeout: float | None = None,
@@ -88,6 +100,7 @@ def load(
 
     resolved_work_dir = work_dir or _env("CWD") or cfg.get("work_dir")
     resolved_profile = profile_dir or _env("PROFILE_DIR") or cfg.get("profile_dir")
+    resolved_ozone = _ozone(ozone or _env("OZONE") or cfg.get("ozone") or defaults.ozone)
     resolved_dedupe = dedupe
     if resolved_dedupe is None:
         resolved_dedupe = False if _env("NO_DEDUPE") is not None else _flag(cfg.get("dedupe"), True)
@@ -103,6 +116,7 @@ def load(
         if (dsh_bin or _env("DSH_BIN") or cfg.get("dsh_bin"))
         else None,
         browser=str(browser or _env("BROWSER") or cfg.get("browser") or "") or None,
+        ozone=resolved_ozone,
         profile_dir=Path(resolved_profile).expanduser() if resolved_profile else defaults.profile_dir,
         width_ratio=float(
             os.environ.get(ENV_PREFIX + "WIDTH_RATIO") or window.get("width_ratio") or defaults.width_ratio

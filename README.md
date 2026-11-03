@@ -5,11 +5,11 @@
 - 服务以分离进程运行：关掉终端、关掉启动器都不影响它
 - 窗口用 `--user-data-dir` + `--app`：没有地址栏，也不会带上你日常浏览器的那堆扩展
 - `start / stop / restart / status` 齐全，`doctor` 打印解析到的依赖、数据目录和端口占用
-- Windows 完整支持；Linux / macOS 尽力而为（见「平台差异」）
+- Windows 完整支持；Linux 完整支持（X11 / XWayland，见「平台差异」）；macOS 尽力而为
 
 ## 安装
 
-### 打包版
+### Windows 打包版
 
 解压后的目录里有：
 
@@ -30,9 +30,22 @@ dshlauncher.exe                :: 等同 open
 > GUI 子系统的 exe 由 `cmd.exe` 启动时不会阻塞提示符，输出会稍后出现在同一个控制台里。
 > 需要等待退出码或串联命令时用 `start /wait dshlauncher.exe status`（PowerShell 同样适用）。
 
+### Linux 安装
+
+解压后是 `dshlauncher`（单文件）+ `_internal/` + `assets/app.png`：
+
+```bash
+./dshlauncher doctor        # 自检：会话类型、依赖、窗口控制能力、端口
+./dshlauncher install       # 写入 ~/.local/share/applications 与图标
+./dshlauncher               # 等同 open
+```
+
+`install` 只写应用菜单（GNOME 默认不显示桌面图标），不会碰 `~/Desktop`。
+
 ### 源码运行
 
 需要 uv、Python 3.12+、Node.js，以及一个 Chromium 系浏览器（Chrome / Edge / Chromium / Brave）。
+`ui` 面板需要 tkinter：uv 管理的 Python 自带；系统 Python 需另装（Arch `tk` / Debian `python3-tk`）。
 
 ```bash
 uv sync
@@ -52,7 +65,7 @@ uv run python -m dshlauncher open
 | `install` / `uninstall` | 创建 / 删除桌面入口 |
 | `version` | 版本号 |
 
-通用参数：`--host --port --cwd --node --dsh-bin --browser --profile-dir --no-dedupe --start-timeout`。
+通用参数：`--host --port --cwd --node --dsh-bin --browser --ozone --profile-dir --no-dedupe --start-timeout`。
 
 ## 数据与配置
 
@@ -99,6 +112,7 @@ min_height = 680
 | `DSHLAUNCHER_NODE` | node 可执行文件 | 自动发现：`PATH` → 常见安装目录 |
 | `DSHLAUNCHER_DSH_BIN` | `@deepseek-ai/dsh/lib/bin.js` 的路径 | 自动发现：`which dsh` → `npm root -g` → `pnpm root -g` |
 | `DSHLAUNCHER_BROWSER` | 浏览器家族名（`chrome` / `edge` / `chromium` / `brave`）或可执行文件路径 | 按 chrome → edge → chromium → brave 顺序探测 |
+| `DSHLAUNCHER_OZONE` | Linux 显示后端：`auto` / `x11` / `wayland` | `auto`（Wayland 会话里 Chrome 用原生 Wayland；`x11` 强制 XWayland 以获得完整窗口控制） |
 | `DSHLAUNCHER_PROFILE_DIR` | 专用浏览器配置目录（零扩展窗口的数据） | `<数据目录>/browser` |
 | `DSHLAUNCHER_NO_DEDUPE` | 设为任意非空值即不复用已有窗口，每次都新开 | 未设置（窗口存在时置前） |
 | `DSHLAUNCHER_START_TIMEOUT` | 等待服务就绪的秒数 | `120` |
@@ -126,13 +140,23 @@ $env:DSHLAUNCHER_BROWSER = "edge"
 
 ## 平台差异
 
-| 能力 | Windows | Linux / macOS |
-|---|---|---|
-| 服务脱离终端 | `DETACHED_PROCESS` + breakaway | `start_new_session` |
-| 窗口尺寸纠正 | 读工作区、`SetWindowPos` 拉回 | 仅 `--window-size/--window-position`，不纠正 |
-| 已有窗口置前 | 枚举顶层窗口 + `SetWindowForeground` | 不支持；每次 `open` 会新开一个应用窗口 |
-| 桌面入口 | `.lnk`（PowerShell COM） | `.desktop` / `.command`（未在真机验证） |
-| 打开日志 | `os.startfile` | `xdg-open` / `open` |
+| 能力 | Windows | Linux / X11 会话 | Linux / Wayland 会话 |
+|---|---|---|---|
+| 服务脱离终端 | `DETACHED_PROCESS` + breakaway | `start_new_session` | `start_new_session` |
+| 窗口枚举 / 置前 | Win32 | EWMH（`_NET_CLIENT_LIST` / `_NET_ACTIVE_WINDOW`） | 默认不可用；`--ozone x11` 时与 X11 相同 |
+| 尺寸 / 位置纠正 | 工作区 + `SetWindowPos` | `_NET_WORKAREA` + `XMoveResizeWindow` | 默认只传 `--window-size`；`--ozone x11` 时与 X11 相同 |
+| 已有窗口去重 | 枚举 + 置前 | 枚举 + 置前 | 默认无法置前，每次 `open` 新开窗口 |
+| 桌面入口 | `.lnk`（PowerShell COM） | `.desktop`（应用菜单） | `.desktop`（应用菜单） |
+| 打开日志 | `os.startfile` | `xdg-open` | `xdg-open` |
+
+Wayland 协议本身不提供跨应用枚举/移动窗口的接口，所以默认让 Chrome 走原生 Wayland（渲染、缩放最好）；
+需要 Windows 一样的置前与尺寸纠正时用 `--ozone x11`（Chrome 走 XWayland）：
+
+```bash
+dshlauncher open --ozone x11
+# 或写进 .dshlauncher/config.toml
+# ozone = "x11"
+```
 
 无扩展窗口依赖 Chromium 的 `--app`，Firefox / Safari 没有等价能力，`doctor` 会直接报错。
 
@@ -159,8 +183,10 @@ uv run python scripts/build.py              # PyInstaller onedir → .build/dist
 uv run python scripts/build.py --skip-build # 只重新部署
 ```
 
-产物是 `.build/dist/dshlauncher/`：单个 `dshlauncher.exe`（1.8 MB）+ `_internal/`（约 30 MB）。
-`app/` 是部署目录（快捷方式指向它），`app/.dshlauncher/` 的数据不会被构建清理。
+产物是 `.build/dist/dshlauncher/`：单个 `dshlauncher.exe`（Windows）/ `dshlauncher`（Linux）
++ `_internal/`（约 30 MB）+ `assets/app.png`。
+必须在目标平台上各自构建（PyInstaller 不交叉编译）；`app/` 是部署目录，`app/.dshlauncher/`
+的数据不会被构建清理。
 
 > 部署前先关掉应用窗口、`stop` 服务：窗口打开时 `_internal` 里的 DLL 被占用，
 > 覆盖会失败（脚本会给出这条提示）。
@@ -181,3 +207,5 @@ uv run ruff format .     # 格式化
 - **端口被占**：`doctor` 会打印占用者的 pid 与命令行；先停掉那个实例，或换 `--port`。
 - **`dsh` 升级后行为不对**：`restart`。
 - **找不到依赖**：`doctor` 逐项列出 node / dsh / 浏览器，缺哪个补哪个，或用 `--node / --dsh-bin / --browser` 指定。
+- **Linux 上点了图标窗口没有置前**：当前是原生 Wayland，属协议限制；用 `--ozone x11` 重开。切换前先关掉旧窗口（Chrome 单实例会忽略新启动参数）。
+- **Linux 上 `dsh` 找不到**：`doctor` 会打印实际解析路径；`~/.local/bin/dsh` 符号链接、npm/pnpm 全局目录都已覆盖，仍失败时用 `DSHLAUNCHER_DSH_BIN` 指定 `lib/bin.js`。

@@ -1,4 +1,4 @@
-"""Linux / macOS 桌面入口（尽力而为，未在真机验证）。"""
+"""macOS 桌面入口（尽力而为，未在真机验证）；Linux 用 ``install/linux.py``。"""
 
 from __future__ import annotations
 

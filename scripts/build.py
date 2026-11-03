@@ -15,6 +15,8 @@ DIST = ROOT / ".build" / "dist"
 BUILD = ROOT / ".build" / "work"
 APP = ROOT / "app"
 DATA_NAME = ".dshlauncher"
+APP_NAME = "dshlauncher.exe" if sys.platform == "win32" else "dshlauncher"
+ICON = ROOT / "packaging" / "assets" / "app.png"
 
 
 def build() -> None:
@@ -44,10 +46,14 @@ def deploy() -> None:
 
     try:
         _sync(source)
+        if ICON.is_file():
+            assets = APP / "assets"
+            assets.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ICON, assets / ICON.name)
     except (shutil.Error, OSError) as exc:
         raise SystemExit(
             "部署失败：目标文件被占用。先关闭 DeepSeek Harness 窗口并执行 "
-            "`dshlauncher.exe stop`，再重试。\n"
+            f"`{APP_NAME} stop`，再重试。\n"
             f"详细：{exc}"
         ) from exc
 
@@ -72,7 +78,7 @@ def _sync(source: Path) -> None:
             item.unlink()
 
     print(f"已部署到 {APP}")
-    exe = APP / "dshlauncher.exe"
+    exe = APP / APP_NAME
     if exe.exists():
         print(f"  {exe}  ({exe.stat().st_size / 1024 / 1024:.1f} MB)")
 

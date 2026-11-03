@@ -11,6 +11,10 @@ def _impl():
         from . import windows
 
         return windows
+    if sys.platform.startswith("linux"):
+        from . import linux
+
+        return linux
     from . import posix
 
     return posix

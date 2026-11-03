@@ -39,6 +39,10 @@ def process_names(browser: str) -> set[str]:
     return {name} if name else set(_PROCESS_NAME.values())
 
 
+def supports_window_control(ozone: str | None = None) -> bool:
+    return True
+
+
 def _user32() -> ctypes.WinDLL:
     return ctypes.WinDLL("user32", use_last_error=True)
 

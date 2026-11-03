@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -60,17 +61,57 @@ def _settle(hwnd: int, target: Rect | None) -> None:
         backend.apply_rect(hwnd, target)
 
 
+def ozone_args(settings: Settings) -> list[str]:
+    """Linux 上显式选择 Chrome 的显示后端；auto 交给 Chrome 自己判断。"""
+    if sys.platform.startswith("linux") and settings.ozone in {"x11", "wayland"}:
+        return [f"--ozone-platform={settings.ozone}"]
+    return []
+
+
+def build_args(
+    settings: Settings,
+    browser: discovery.Browser,
+    url: str,
+    target: Rect | None,
+    *,
+    window_control: bool,
+) -> list[str]:
+    """Chrome 的应用窗口命令行。"""
+    args = [
+        str(browser.path),
+        f"--app={url}",
+        f"--user-data-dir={settings.profile_dir}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-sync",
+        "--no-service-autorun",
+        "--disable-features=Translate",
+    ]
+    args += ozone_args(settings)
+    if target is not None:
+        args.append(f"--window-size={target.width},{target.height}")
+        # 原生 Wayland 不允许客户端指定位置，传了也会被忽略。
+        if window_control:
+            args.append(f"--window-position={target.x},{target.y}")
+    return args
+
+
 def launch(settings: Settings, url: str) -> str:
-    """打开应用窗口；已有窗口时只置前。返回 ``new`` 或 ``focused``。"""
+    """打开应用窗口；已有窗口时只置前。返回 ``new`` 或 ``focused``。
+
+    原生 Wayland（``ozone=auto`` / ``wayland``）没有可用的窗口控制 API，
+    dedupe 与尺寸纠正在该模式下不生效，只能每次都新开窗口。
+    """
     backend = platform.load()
     browser = discovery.browser_exe(settings.browser)
     names = backend.process_names(browser.family)
     profile = settings.profile_dir
+    window_control = backend.supports_window_control(settings.ozone)
 
     work = backend.work_area()
     target = geometry.preferred_rect(work, **settings.window_kwargs()) if work is not None else None
 
-    if settings.dedupe:
+    if settings.dedupe and window_control:
         existing = backend.find_window(_profile_pids(profile, names))
         if existing is not None:
             _settle(existing, target)
@@ -78,20 +119,7 @@ def launch(settings: Settings, url: str) -> str:
             return "focused"
 
     profile.mkdir(parents=True, exist_ok=True)
-    args = [
-        str(browser.path),
-        f"--app={url}",
-        f"--user-data-dir={profile}",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-sync",
-        "--no-service-autorun",
-        "--disable-features=Translate",
-    ]
-    if target is not None:
-        args.append(f"--window-size={target.width},{target.height}")
-        args.append(f"--window-position={target.x},{target.y}")
-
+    args = build_args(settings, browser, url, target, window_control=window_control)
     subprocess.Popen(
         args,
         cwd=str(browser.path.parent),
@@ -103,7 +131,8 @@ def launch(settings: Settings, url: str) -> str:
         **backend.detach_kwargs(),
     )
 
-    hwnd = _wait_window(profile, names)
-    if hwnd is not None:
-        _settle(hwnd, target)
+    if window_control:
+        hwnd = _wait_window(profile, names)
+        if hwnd is not None:
+            _settle(hwnd, target)
     return "new"
