@@ -208,4 +208,8 @@ uv run ruff format .     # 格式化
 - **`dsh` 升级后行为不对**：`restart`。
 - **找不到依赖**：`doctor` 逐项列出 node / dsh / 浏览器，缺哪个补哪个，或用 `--node / --dsh-bin / --browser` 指定。
 - **Linux 上点了图标窗口没有置前**：当前是原生 Wayland，属协议限制；用 `--ozone x11` 重开。切换前先关掉旧窗口（Chrome 单实例会忽略新启动参数）。
+- **控制面板按钮没有文字**：uv / PyInstaller 自带的 Tk 是 `no-xft` 构建，只有核心 X 字体，中文宽度为 0；
+  `ui` 检测到后自动改用英文标签与英文状态（`doctor` 的 `tkinter` 行会注明）。
+- **双击时提示端口占用**：若 3080 上是手动启动的 `dsh web`，`open` 会停止它并接管重启（token 只存在于它的 stdout，无法复用）；
+  占用者是其它程序时才会报错。
 - **Linux 上 `dsh` 找不到**：`doctor` 会打印实际解析路径；`~/.local/bin/dsh` 符号链接、npm/pnpm 全局目录都已覆盖，仍失败时用 `DSHLAUNCHER_DSH_BIN` 指定 `lib/bin.js`。

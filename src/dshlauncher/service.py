@@ -11,6 +11,7 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from pathlib import Path
 
 import psutil
 
@@ -21,6 +22,8 @@ from .settings import Settings
 START_MARKER = "[launcher] start"
 URL_PATTERN = re.compile(r"dsh web: (https?://\S+)")
 BIN_JS_MARKER = "@deepseek-ai/dsh/lib/bin.js"
+#: 外部手动启动的 dsh 可能是 PATH 上的 shim（符号链接/脚本），不一定带 bin.js 路径。
+DSH_NAMES = {"dsh", "dsh.cmd", "dsh.exe", "dsh.js"}
 
 STOP_TIMEOUT = 10.0
 LOG_ROTATE_BYTES = 5 * 1024 * 1024
@@ -33,6 +36,16 @@ class State:
     create_time: float
     port: int
     url: str | None = None
+
+
+def is_dsh_cmdline(cmdline: str) -> bool:
+    """判断命令行是不是 `dsh web`（兼容 bin.js 路径和 PATH 上的 shim）。"""
+    joined = cmdline.replace("\\", "/")
+    if " web" not in joined:
+        return False
+    if BIN_JS_MARKER in joined:
+        return True
+    return any(Path(part).name in DSH_NAMES for part in joined.split())
 
 
 def parse_url(text: str) -> str | None:
@@ -102,7 +115,7 @@ class Service:
             cmdline = " ".join(proc.cmdline())
         except (psutil.Error, OSError):
             return False
-        return BIN_JS_MARKER in cmdline.replace("\\", "/")
+        return is_dsh_cmdline(cmdline)
 
     def live_process(self, state: State | None) -> psutil.Process | None:
         """pid 文件里的服务进程；create_time 不符视为 PID 被复用。"""
@@ -124,10 +137,34 @@ class Service:
                 cmdline = proc.info.get("cmdline") or []
             except psutil.Error:
                 continue
-            joined = " ".join(str(part) for part in cmdline).replace("\\", "/")
-            if BIN_JS_MARKER in joined and " web" in joined:
+            joined = " ".join(str(part) for part in cmdline)
+            if is_dsh_cmdline(joined):
                 found.append(proc)
         return found
+
+    def port_owner_process(self) -> psutil.Process | None:
+        """监听本端口的进程（无法获取时返回 None）。"""
+        try:
+            connections = psutil.net_connections(kind="tcp")
+        except (psutil.Error, OSError):
+            return None
+        for conn in connections:
+            if (
+                conn.laddr
+                and conn.laddr.port == self.settings.port
+                and conn.status == psutil.CONN_LISTEN
+                and conn.pid
+            ):
+                try:
+                    return psutil.Process(conn.pid)
+                except psutil.Error:
+                    return None
+        return None
+
+    def _wait_port_closed(self, timeout: float = STOP_TIMEOUT) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and self.port_open():
+            time.sleep(0.1)
 
     def port_owner(self) -> str | None:
         try:
@@ -275,6 +312,14 @@ class Service:
             return state, False
 
         if self.port_open():
+            owner = self.port_owner_process()
+            if owner is not None and self._is_dsh_process(owner):
+                # 外部（手动 `dsh web`）启动的实例：token 只在它的 stdout 里，
+                # 无法复用；直接接管重启，保证双击一次就能拿到窗口。
+                paths.audit(f"takeover: 端口 {self.settings.port} 上的外部 dsh web pid={owner.pid}")
+                self._kill_tree(owner.pid)
+                self._wait_port_closed()
+                return self.start(), True
             raise RuntimeError(
                 f"端口 {self.settings.port} 已被其它进程占用：{self.port_owner() or '未知'}\n"
                 "请先停止该实例，或用 --port / DSHLAUNCHER_PORT 换一个端口。"
@@ -283,16 +328,33 @@ class Service:
         return self.start(), True
 
     # ── 展示 ──────────────────────────────────────────────────────────
-    def describe(self) -> str:
+    def describe(self, *, english: bool = False) -> str:
         state = self.read_state()
         proc = self.live_process(state)
         running = proc is not None
         listening = self.port_open()
         url = self.latest_url() if running else None
+        pid = proc.pid if proc is not None else "-"
+        owner = self.port_owner() or ("unknown" if english else "未知")
+
+        if english:
+            lines = [
+                f"Service : {'running' if running else 'stopped'}",
+                f"PID     : {pid}",
+                f"Port    : {self.settings.host}:{self.settings.port} "
+                f"({'LISTENING' if listening else 'closed'})",
+                f"URL     : {url or '-'}",
+                f"Workdir : {self.settings.work_dir}",
+                f"Data    : {paths.data_dir()}",
+                f"Log     : {paths.log_path()}",
+            ]
+            if not running and listening:
+                lines.append(f"Warning : port held by -> {owner}")
+            return "\n".join(lines)
 
         lines = [
             f"服务: {'运行中' if running else '未运行'}",
-            f"PID : {proc.pid if proc is not None else '-'}",
+            f"PID : {pid}",
             f"端口: {self.settings.host}:{self.settings.port} ({'LISTENING' if listening else 'closed'})",
             f"URL : {url or '-'}",
             f"工作目录: {self.settings.work_dir}",
@@ -300,5 +362,5 @@ class Service:
             f"日志: {paths.log_path()}",
         ]
         if not running and listening:
-            lines.append(f"注意: 端口被外部进程占用 -> {self.port_owner() or '未知'}")
+            lines.append(f"注意: 端口被外部进程占用 -> {owner}")
         return "\n".join(lines)

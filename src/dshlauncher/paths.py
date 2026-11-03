@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -93,6 +94,16 @@ def profile_dir() -> Path:
 
 def config_path() -> Path:
     return data_dir() / "config.toml"
+
+
+def audit(text: str) -> None:
+    """追加一行启动器审计日志（GUI 启动时唯一可发现的记录）。"""
+    try:
+        ensure_data_dir()
+        with launcher_log_path().open("a", encoding="utf-8") as handle:
+            handle.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {text.splitlines()[0]}\n")
+    except OSError:
+        pass
 
 
 def child_env() -> dict[str, str]:

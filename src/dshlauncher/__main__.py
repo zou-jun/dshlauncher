@@ -8,7 +8,6 @@ import os
 import subprocess
 import sys
 import unicodedata
-from datetime import datetime
 from pathlib import Path
 
 from . import __version__, actions, discovery, install, paths, platform, service
@@ -55,10 +54,7 @@ def _utf8_streams() -> None:
 
 
 def _audit(text: str) -> None:
-    with contextlib.suppress(OSError):
-        paths.ensure_data_dir()
-        with paths.launcher_log_path().open("a", encoding="utf-8") as handle:
-            handle.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {text.splitlines()[0]}\n")
+    paths.audit(text)
 
 
 def _emit(text: str) -> None:
@@ -137,10 +133,19 @@ def _window_control_text(backend, ozone: str) -> str:  # noqa: ANN001 - 平台�
 
 def _tk_text() -> str:
     try:
-        import tkinter
+        import tkinter as tk
+        from tkinter import font as tkfont
+
+        root = tk.Tk()
+        root.withdraw()
     except Exception as exc:  # noqa: BLE001 - doctor 要展示失败原因
         return f"不可用: {exc}"
-    return f"可用 (Tk {tkinter.TkVersion})"
+    try:
+        if tkfont.nametofont("TkDefaultFont").measure("窗口") > 0:
+            return f"可用 (Tk {tk.TkVersion})"
+        return f"Tk {tk.TkVersion} 缺少中文字形（无 Xft），控制面板将使用英文标签"
+    finally:
+        root.destroy()
 
 
 def _cmd_open(args: argparse.Namespace) -> int:
