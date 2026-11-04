@@ -39,13 +39,21 @@ class State:
 
 
 def is_dsh_cmdline(cmdline: str) -> bool:
-    """判断命令行是不是 `dsh web`（兼容 bin.js 路径和 PATH 上的 shim）。"""
+    """判断命令行是不是 `dsh web`（兼容 bin.js 路径和 PATH 上的 shim）。
+
+    只认 "dsh 可执行文件 + 紧邻的 web 子命令"，避免把 ``node dsh web.js``
+    这类无关进程（Windows 上 `stop` 会清理它们）当成服务。
+    """
     joined = cmdline.replace("\\", "/")
     if " web" not in joined:
         return False
     if BIN_JS_MARKER in joined:
         return True
-    return any(Path(part).name in DSH_NAMES for part in joined.split())
+    parts = [part.strip('"') for part in joined.split()]
+    return any(
+        Path(part).name in DSH_NAMES and parts[index + 1] == "web"
+        for index, part in enumerate(parts[:-1])
+    )
 
 
 def parse_url(text: str) -> str | None:
@@ -130,7 +138,7 @@ class Service:
         return proc if self._is_dsh_process(proc) else None
 
     def dsh_processes(self) -> list[psutil.Process]:
-        """命令行里带 dsh bin.js + web 的 node 进程（清理无 state 的残留）。"""
+        """命令行匹配 dsh web 的进程（清理无 state 的残留）。"""
         found: list[psutil.Process] = []
         for proc in psutil.process_iter(["pid", "cmdline"]):
             try:
@@ -335,7 +343,9 @@ class Service:
         listening = self.port_open()
         url = self.latest_url() if running else None
         pid = proc.pid if proc is not None else "-"
-        owner = self.port_owner() or ("unknown" if english else "未知")
+        warning = not running and listening
+        # port_owner() 要枚举整张 TCP 表；只在确实要提示占用者时才查。
+        owner = (self.port_owner() or ("unknown" if english else "未知")) if warning else ""
 
         if english:
             lines = [
@@ -348,7 +358,7 @@ class Service:
                 f"Data    : {paths.data_dir()}",
                 f"Log     : {paths.log_path()}",
             ]
-            if not running and listening:
+            if warning:
                 lines.append(f"Warning : port held by -> {owner}")
             return "\n".join(lines)
 
@@ -361,6 +371,6 @@ class Service:
             f"数据目录: {paths.data_dir()}",
             f"日志: {paths.log_path()}",
         ]
-        if not running and listening:
+        if warning:
             lines.append(f"注意: 端口被外部进程占用 -> {owner}")
         return "\n".join(lines)

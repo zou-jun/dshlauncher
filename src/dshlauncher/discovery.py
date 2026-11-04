@@ -182,20 +182,27 @@ def _shim_candidates(shim: Path) -> list[Path]:
     return candidates
 
 
-def dsh_candidates() -> list[Path | str | None]:
-    candidates: list[Path | str | None] = []
-    shim = shutil.which("dsh")
-    if shim is not None:
-        candidates.extend(_shim_candidates(Path(shim)))
-    for root in _node_module_roots():
-        candidates.append(root.joinpath(*DSH_ENTRY))
-    return candidates
-
-
 def dsh_bin(configured: Path | None = None) -> Path:
-    candidate = _first_file([configured, _env("DSH_BIN"), *dsh_candidates()])
+    """按代价从低到高查找 bin.js：显式配置 → PATH shim → 包管理器查询。
+
+    包管理器查询要起 ``npm``/``pnpm`` 子进程（Windows 上约 1 秒），
+    所以必须等前面的候选都落空再执行。
+    """
+    candidate = _first_file([configured, _env("DSH_BIN")])
     if candidate is not None:
         return candidate
+
+    shim = shutil.which("dsh")
+    if shim is not None:
+        candidate = _first_file(_shim_candidates(Path(shim)))
+        if candidate is not None:
+            return candidate
+
+    for root in _node_module_roots():
+        entry = root.joinpath(*DSH_ENTRY)
+        if entry.is_file():
+            return entry
+
     raise DiscoveryError(
         "找不到 @deepseek-ai/dsh 的 lib/bin.js：先执行 `npm i -g @deepseek-ai/dsh`，"
         "或用 --dsh-bin / DSHLAUNCHER_DSH_BIN 指定"

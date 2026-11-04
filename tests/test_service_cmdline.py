@@ -9,6 +9,14 @@ def test_matches_path_shim() -> None:
     assert is_dsh_cmdline("node /home/zj/.local/bin/dsh web --no-open")
 
 
+def test_matches_quoted_windows_shim() -> None:
+    assert is_dsh_cmdline(r'"C:\Users\zj\AppData\Roaming\npm\dsh.cmd" web --no-open')
+
+
+def test_rejects_web_script_next_to_dsh_like_name() -> None:
+    assert not is_dsh_cmdline("node C:/tools/dsh web.js")
+
+
 def test_rejects_other_web_servers() -> None:
     assert not is_dsh_cmdline("python -m http.server 8000")
     assert not is_dsh_cmdline("node /srv/other/web.js")
