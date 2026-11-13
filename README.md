@@ -181,6 +181,7 @@ src/dshlauncher/          源码包（platform/ 与 install/ 是两个子包）
 tests/                    纯逻辑单测
 packaging/                PyInstaller 入口、spec、应用图标
 scripts/build.py          打包 + 部署
+Makefile                  任务入口（检查 / 跑服务 / 打包 / 清理）
 app/                      部署目录：dshlauncher.exe + _internal/ + .dshlauncher/ 数据
 .build/                   PyInstaller 中间产物与 dist（生成物，gitignore）
 .cache/                   pytest / ruff 缓存（gitignore）
@@ -189,13 +190,40 @@ app/                      部署目录：dshlauncher.exe + _internal/ + .dshlaun
 `src/` 布局 + `uv sync` 的 editable 安装意味着 `python -m dshlauncher` 在任何工作目录都能用，
 源码模式下的数据目录仍然落在项目根（向上查找 `pyproject.toml`，与包所在层级无关）。
 
+## 开发入口（make）
+
+环境与依赖仍然由 uv 独立管理（`uv sync` / `uv add` / `uv lock`），`make` 只做任务，不包装 uv：
+
+```bash
+make            # 列出全部目标
+make env        # 解释器 / ruff / pytest / pyinstaller 版本
+make check      # lint + format --check + test
+make smoke      # start → status → stop，真机验证端口与就绪
+make build      # 打包并部署到 app/
+```
+
+其余目标见 `make help`：`format`、`test ARGS="-k port"`、`start` / `stop` / `restart` /
+`status` / `doctor` / `ui` / `run`、`deploy`、`clean`、`distclean`。
+
+Windows 上需要一份 GNU make：
+
+- MSYS2：`pacman -S mingw-w64-x86_64-make`，把 `mingw64/bin/mingw32-make.exe` 连同
+  `libintl-8.dll`、`libiconv-2.dll` 拷到一个独立目录（例如 `%USERPROFILE%\.local\gnumake`），
+  改名 `make.exe` 后把该目录加进用户 `PATH`；
+- 或者直接用 MSYS2 自带的 `C:\msys64\usr\bin\make.exe`，把该目录**追加**到 `PATH` 末尾
+  （前置会让 Git Bash 用上 MSYS2 的 sh/awk）。
+
+Linux / macOS 用发行版的 `make` 即可。
+
 ## 构建
 
 ```bash
 uv sync
-uv run python scripts/build.py              # PyInstaller onedir → .build/dist，再同步到 app/
-uv run python scripts/build.py --skip-build # 只重新部署
+make build          # PyInstaller onedir → .build/dist，再同步到 app/
+make deploy         # 只重新部署（复用上次构建）
 ```
+
+等价的手写命令：`uv run python scripts/build.py [--skip-build]`。
 
 产物是 `.build/dist/dshlauncher/`：单个 `dshlauncher.exe`（Windows）/ `dshlauncher`（Linux）
 + `_internal/`（约 30 MB）+ `assets/app.png`。
