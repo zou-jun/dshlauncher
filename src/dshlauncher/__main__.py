@@ -44,8 +44,28 @@ def _attach_parent_console() -> None:
         pass
 
 
+def _console_utf8() -> bool:
+    """当前 Windows 控制台的输出代码页是不是 65001（UTF-8）。"""
+    try:
+        import ctypes
+
+        return ctypes.windll.kernel32.GetConsoleOutputCP() == 65001
+    except (AttributeError, OSError):  # 非 Windows 或没有控制台
+        return False
+
+
 def _utf8_streams() -> None:
-    """冻结成 exe 后 stdout 会退回 ANSI 代码页，中文会乱码；统一成 UTF-8。"""
+    """让输出编码跟随终端，而不是无条件改成 UTF-8。
+
+    - 用户显式设置了 PYTHONIOENCODING / PYTHONUTF8：一律尊重，不动；
+    - Windows 传统代码页（936 等）：保持 Python 默认编码，中文才不会被控制台
+      按 GBK 解读成乱码；
+    - 控制台是 65001 或非 Windows：统一 UTF-8（POSIX 终端没有代码页问题）。
+    """
+    if os.environ.get("PYTHONIOENCODING") or os.environ.get("PYTHONUTF8"):
+        return
+    if sys.platform == "win32" and not _console_utf8():
+        return
     for stream in (sys.stdout, sys.stderr):
         if stream is None:
             continue

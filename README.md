@@ -245,6 +245,7 @@ uv run ruff format .     # 格式化
 ## 故障排查
 
 - **窗口里是 401**：服务重启过而窗口还拿着旧 token —— 关掉窗口重新点图标。
+- **终端里中文乱码**：输出编码跟随控制台代码页——936（GBK）控制台保持默认编码，65001 才用 UTF-8；显式设置 `PYTHONIOENCODING` / `PYTHONUTF8` 时以你的设置为准。PowerShell 5.1 默认 936，想让会话统一 UTF-8 可在 `$PROFILE` 里设 `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)`。
 - **端口被占或被系统保留**：`doctor` 的「端口」行会区分 `被占用` / `系统保留（区间）`，占用时还会打印占用者的 pid 与命令行。默认端口会自动回退；显式 `--port` 撞上保留段会直接报错并给出可换端口，`netsh interface ipv4 show excludedportrange protocol=tcp` 可查看全部保留段。
 - **`dsh` 升级后行为不对**：`restart`。
 - **找不到依赖**：`doctor` 逐项列出 node / dsh / 浏览器，缺哪个补哪个，或用 `--node / --dsh-bin / --browser` 指定。
