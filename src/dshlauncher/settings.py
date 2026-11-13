@@ -13,6 +13,7 @@ from . import geometry, paths
 
 ENV_PREFIX = "DSHLAUNCHER_"
 DEFAULT_HOST = "127.0.0.1"
+#: 历史默认端口；不可 bind 时由 ports.candidates() 依次回退到 18080 起。
 DEFAULT_PORT = 3080
 DEFAULT_START_TIMEOUT = 120.0
 #: Linux 上 Chrome 的显示后端：auto 交给 Chrome（Wayland 会话里是原生 Wayland），
@@ -24,6 +25,8 @@ OZONE_MODES = ("auto", "x11", "wayland")
 class Settings:
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
+    #: port 是否来自 CLI / 环境变量 / config.toml：显式指定的端口不自动改。
+    port_explicit: bool = False
     #: 服务工作目录：默认系统临时目录，可用 DSHLAUNCHER_CWD / --cwd 覆盖。
     work_dir: Path = field(default_factory=lambda: Path(tempfile.gettempdir()))
     node: Path | None = None
@@ -101,13 +104,17 @@ def load(
     resolved_work_dir = work_dir or _env("CWD") or cfg.get("work_dir")
     resolved_profile = profile_dir or _env("PROFILE_DIR") or cfg.get("profile_dir")
     resolved_ozone = _ozone(ozone or _env("OZONE") or cfg.get("ozone") or defaults.ozone)
+    # --port 0 表示交给系统分配，不能用 `or` 判断（0 也是有效值）。
+    requested_port = port if port is not None else _env("PORT") or cfg.get("port")
+    resolved_port = int(requested_port) if requested_port is not None else defaults.port
     resolved_dedupe = dedupe
     if resolved_dedupe is None:
         resolved_dedupe = False if _env("NO_DEDUPE") is not None else _flag(cfg.get("dedupe"), True)
 
     return Settings(
         host=str(host or _env("HOST") or cfg.get("host") or defaults.host),
-        port=int(port or _env("PORT") or cfg.get("port") or defaults.port),
+        port=resolved_port,
+        port_explicit=requested_port is not None,
         work_dir=Path(resolved_work_dir).expanduser() if resolved_work_dir else defaults.work_dir,
         node=Path(node or _env("NODE") or cfg.get("node") or "").expanduser()
         if (node or _env("NODE") or cfg.get("node"))

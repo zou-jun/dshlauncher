@@ -10,7 +10,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
-from . import __version__, actions, discovery, install, paths, platform, service
+from . import __version__, actions, discovery, install, paths, platform, ports, service
 from . import settings as settings_mod
 
 
@@ -178,6 +178,19 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _port_text(controller: service.Service, settings: settings_mod.Settings) -> str:
+    """端口能否 bind；默认端口不可用时一并给出会自动落到哪个端口。"""
+    verdict = ports.probe(settings.host, settings.port)
+    text = f"{settings.host}:{settings.port}  {verdict.describe()}"
+    planned = controller.effective_port()
+    if planned == settings.port:
+        return text
+    state = controller.read_state()
+    live = state is not None and state.port == planned and controller.live_process(state) is not None
+    suffix = "LISTENING" if live else ports.probe(settings.host, planned).describe()
+    return f"{text}  → 自动改用 {settings.host}:{planned}（{suffix}）"
+
+
 def _cmd_doctor(args: argparse.Namespace) -> int:
     settings = _settings(args)
     backend = platform.load()
@@ -194,7 +207,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         ("数据目录", str(paths.data_dir())),
         ("配置文件", f"{config}  ({'存在' if config.is_file() else '不存在，全部走默认值'})"),
         ("工作目录", str(settings.work_dir)),
-        ("端口", f"{settings.host}:{settings.port}"),
+        ("端口", _port_text(controller, settings)),
     ]
     for label, resolver in (
         ("node", lambda: str(discovery.node_exe(settings.node))),
@@ -267,7 +280,11 @@ HANDLERS = {
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--host", help="服务绑定地址（默认 127.0.0.1）")
-    parser.add_argument("--port", type=int, help="服务端口（默认 3080）")
+    parser.add_argument(
+        "--port",
+        type=int,
+        help="服务端口（默认 3080；该端口被系统保留或被占用时自动回退到 18080 起；0 = 交给系统分配）",
+    )
     parser.add_argument("--cwd", help="服务工作目录（默认系统临时目录）")
     parser.add_argument("--node", help="node 可执行文件路径")
     parser.add_argument("--dsh-bin", dest="dsh_bin", help="dsh 的 lib/bin.js 路径")

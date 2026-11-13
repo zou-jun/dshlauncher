@@ -58,7 +58,7 @@ uv run python -m dshlauncher open
 | 命令 | 作用 |
 |---|---|
 | `open`（默认） | 确保服务在跑，然后打开或置前窗口 |
-| `start` / `stop` / `restart` | 只操作服务；`dsh` 升级后用 `restart` |
+| `start` / `stop` / `restart` | 只操作服务；已在跑时 `start` 直接复用，显式换端口会先停掉旧实例；`dsh` 升级后用 `restart` |
 | `status` | 服务 PID、端口、token URL、路径 |
 | `doctor` | 依赖发现结果、平台后端、端口占用者、配置来源 |
 | `ui` | tkinter 控制面板（缺 tk 时自动退化为终端菜单） |
@@ -84,7 +84,7 @@ uv run python -m dshlauncher open
 
 ```toml
 # .dshlauncher/config.toml
-port = 3080
+# port = 18080              # 省略则自动挑（上次用过的 → 3080 → 18080 起）
 host = "127.0.0.1"
 work_dir = "C:/Users/me/AppData/Local/Temp"
 browser = "chrome"          # 或可执行文件路径
@@ -99,6 +99,20 @@ min_width = 1024
 min_height = 680
 ```
 
+### 端口
+
+默认 `3080`。启动前会对目标端口**真实 bind 一次**判定状态，而不是只看有没有人在连：
+
+| 状态 | 行为 |
+|---|---|
+| 可用 | 直接使用 |
+| 被其它进程占用 | 端口上是 `dsh web` 则接管重启，否则报错并打印占用者 |
+| 系统保留（Windows 排除段） | 跳过，按 `上次用过的端口 → 3080 → 18080 → 18081…` 依次尝试 |
+
+显式指定的端口（`--port` / `DSHLAUNCHER_PORT` / `config.toml`）**不会**被自动替换：不可用时直接报错，并给出命中的保留段与可用的替代端口。`--port 0` 交给系统分配，真实端口从启动 URL 里取回。
+
+选中的端口写入 `state.json`，下次优先复用——浏览器 cookie 绑 `host:port`，端口稳定才不会反复要求重新授权。
+
 ### 环境变量
 
 全部带 `DSHLAUNCHER_` 前缀（Windows 不区分大小写），**空值等同未设置**。
@@ -107,7 +121,7 @@ min_height = 680
 |---|---|---|
 | `DSHLAUNCHER_HOME` | 运行时数据目录：`state.json`、两份日志、浏览器 profile 都在这里 | exe 同级 `.dshlauncher/`；源码运行是项目根；该位置不可写时回退用户数据目录 |
 | `DSHLAUNCHER_HOST` | 服务监听地址 | `127.0.0.1` |
-| `DSHLAUNCHER_PORT` | 服务端口 | `3080`（cookie 绑 `host:port`，换端口等于重新授权） |
+| `DSHLAUNCHER_PORT` | 服务端口 | `3080`；被系统保留或占用时自动回退到 `18080` 起。设为显式值即固定，不自动替换（cookie 绑 `host:port`，换端口等于重新授权） |
 | `DSHLAUNCHER_CWD` | 服务工作目录；会话里 bash/文件工具的默认起步目录 | 系统临时目录（Windows 为 `%TEMP%`） |
 | `DSHLAUNCHER_NODE` | node 可执行文件 | 自动发现：`PATH` → 常见安装目录 |
 | `DSHLAUNCHER_DSH_BIN` | `@deepseek-ai/dsh/lib/bin.js` 的路径 | 自动发现：`which dsh` → `npm root -g` → `pnpm root -g` |
@@ -204,7 +218,7 @@ uv run ruff format .     # 格式化
 ## 故障排查
 
 - **窗口里是 401**：服务重启过而窗口还拿着旧 token —— 关掉窗口重新点图标。
-- **端口被占**：`doctor` 会打印占用者的 pid 与命令行；先停掉那个实例，或换 `--port`。
+- **端口被占或被系统保留**：`doctor` 的「端口」行会区分 `被占用` / `系统保留（区间）`，占用时还会打印占用者的 pid 与命令行。默认端口会自动回退；显式 `--port` 撞上保留段会直接报错并给出可换端口，`netsh interface ipv4 show excludedportrange protocol=tcp` 可查看全部保留段。
 - **`dsh` 升级后行为不对**：`restart`。
 - **找不到依赖**：`doctor` 逐项列出 node / dsh / 浏览器，缺哪个补哪个，或用 `--node / --dsh-bin / --browser` 指定。
 - **Linux 上点了图标窗口没有置前**：当前是原生 Wayland，属协议限制；用 `--ozone x11` 重开。切换前先关掉旧窗口（Chrome 单实例会忽略新启动参数）。
