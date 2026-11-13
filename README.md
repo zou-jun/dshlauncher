@@ -205,13 +205,12 @@ make build      # 打包并部署到 app/
 其余目标见 `make help`：`format`、`test ARGS="-k port"`、`start` / `stop` / `restart` /
 `status` / `doctor` / `ui` / `run`、`deploy`、`clean`、`distclean`。
 
-Windows 上需要一份 GNU make：
+Windows 上用 MSYS2 自带的 make：`pacman -S make`，再把 `C:\msys64\usr\bin` **追加**到用户 `PATH`
+（不要前置——那会让所有终端优先用上 MSYS2 的 `find` / `sort` / `tar`）。同一目录下的 `sh`、`git`、
+`grep` 一并可用，recipe 里的 POSIX 命令才有得跑；只有 `make.exe` 而没有 `sh` 时，make 会退回
+`cmd.exe`，`.venv/Scripts/python.exe` 这种正斜杠路径会被 cmd 截断。
 
-- MSYS2：`pacman -S mingw-w64-x86_64-make`，把 `mingw64/bin/mingw32-make.exe` 连同
-  `libintl-8.dll`、`libiconv-2.dll` 拷到一个独立目录（例如 `%USERPROFILE%\.local\gnumake`），
-  改名 `make.exe` 后把该目录加进用户 `PATH`；
-- 或者直接用 MSYS2 自带的 `C:\msys64\usr\bin\make.exe`，把该目录**追加**到 `PATH` 末尾
-  （前置会让 Git Bash 用上 MSYS2 的 sh/awk）。
+> `make` 的 recipe 直接调用 `.venv` 里的解释器，所以环境仍由 uv 管理：先 `uv sync`，再 `make ...`。
 
 Linux / macOS 用发行版的 `make` 即可。
 
