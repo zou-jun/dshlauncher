@@ -27,6 +27,7 @@ ERROR = "error"
 _RANGE_LINE = re.compile(r"^(\d+)\s+(\d+)\s*\*?$")
 _WSAEACCES = 10013
 _WSAEADDRINUSE = 10048
+CREATE_NO_WINDOW = 0x08000000
 
 
 @dataclass(frozen=True)
@@ -82,11 +83,14 @@ def excluded_ranges() -> tuple[tuple[int, int], ...]:
     if sys.platform != "win32":
         return ()
     try:
+        # netsh 是控制台程序；GUI 启动器里不加这个标志会闪一个终端窗口。
+        flags = {"creationflags": CREATE_NO_WINDOW} if sys.platform == "win32" else {}
         completed = subprocess.run(
             ["netsh", "interface", "ipv4", "show", "excludedportrange", "protocol=tcp"],
             capture_output=True,
             timeout=10,
             check=False,
+            **flags,
         )
     except (OSError, subprocess.SubprocessError):
         return ()

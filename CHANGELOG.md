@@ -10,6 +10,7 @@
 - `state.json` 改为原子写；`stop` 只处理可信实例/目标端口，端口未释放时保留状态文件。
 - `launcher.log` 按 1 MB 轮转，异常记录附带调用点摘要。
 - Chrome 启动在受限 Job 下 `CREATE_BREAKAWAY_FROM_JOB` 失败时回退普通分离。
+- Windows `netsh` 端口保留段探测使用 `CREATE_NO_WINDOW`，GUI 启动不再闪终端窗口。
 - Windows 桌面入口只保留 `dsh.lnk`；Linux 只保留 `dsh.desktop`。
 - 依赖加入 `pystray` / `Pillow`；PyInstaller 按平台裁剪托盘后端。
 

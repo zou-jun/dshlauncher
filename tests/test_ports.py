@@ -83,3 +83,16 @@ def test_ephemeral_zero_is_free_without_binding(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(ports, "_bind", boom)
     assert ports.probe("127.0.0.1", 0).free
+
+
+def test_excluded_ranges_hides_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run(args: list[str], **kwargs: object):  # noqa: ANN202 - 测试替身
+        calls.append(kwargs)
+        return type("R", (), {"stdout": b"2987 3086\n"})()
+
+    monkeypatch.setattr(ports, "sys", type("S", (), {"platform": "win32"})())
+    monkeypatch.setattr(ports.subprocess, "run", fake_run)
+    assert ports.excluded_ranges() == ((2987, 3086),)
+    assert calls[0]["creationflags"] == ports.CREATE_NO_WINDOW
