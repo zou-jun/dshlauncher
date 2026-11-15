@@ -459,3 +459,25 @@ def open_path(path: Path) -> None:
     "用系统默认程序打开文件。"
     opener = "open" if sys.platform == "darwin" else (shutil.which("xdg-open") or "xdg-open")
     subprocess.Popen([opener, str(path)])
+
+
+def message(title: str, text: str, *, error: bool = False) -> None:
+    """优先 zenity/kdialog 原生弹窗，都没有时退回桌面通知。"""
+    dialogs = (
+        ["zenity", "--error" if error else "--info", "--no-markup", "--title", title, "--text", text],
+        ["kdialog", "--title", title, "--error" if error else "--msgbox", text],
+    )
+    for command in dialogs:
+        if shutil.which(command[0]) is None:
+            continue
+        try:
+            subprocess.run(command, check=False)
+        except OSError:
+            continue
+        return
+    notify = ["notify-send"]
+    if error:
+        notify.append("--urgency=critical")
+    notify += [title, text]
+    with contextlib.suppress(OSError):
+        subprocess.run(notify, check=False, timeout=5)

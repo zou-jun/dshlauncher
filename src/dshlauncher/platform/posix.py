@@ -7,6 +7,7 @@ Linux 走 ``linux`` 后端（X11/EWMH）；这里只处理 macOS：没有等价�
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import subprocess
 import sys
@@ -63,3 +64,23 @@ def present(hwnd: int) -> None:
 def open_path(path: Path) -> None:
     opener = "open" if sys.platform == "darwin" else (shutil.which("xdg-open") or "xdg-open")
     subprocess.Popen([opener, str(path)])
+
+
+def message(title: str, text: str, *, error: bool = False) -> None:
+    """macOS 用 osascript 弹窗；其它 POSIX 退化为桌面通知。"""
+    if shutil.which("osascript") is not None:
+
+        def quote(value: str) -> str:
+            return value.replace("\\", "\\\\").replace('"', '\\"')
+
+        level = " as critical" if error else ""
+        script = f'display alert "{quote(title)}" message "{quote(text)}"{level}'
+        with contextlib.suppress(OSError):
+            subprocess.run(["osascript", "-e", script], check=False, timeout=120)
+        return
+    notify = ["notify-send"]
+    if error:
+        notify.append("--urgency=critical")
+    notify += [title, text]
+    with contextlib.suppress(OSError):
+        subprocess.run(notify, check=False, timeout=5)

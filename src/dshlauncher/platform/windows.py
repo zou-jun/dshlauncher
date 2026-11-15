@@ -115,3 +115,23 @@ def present(hwnd: int) -> None:
 
 def open_path(path: Path) -> None:
     os.startfile(str(path))  # noqa: S606 - 交给系统默认程序
+
+
+MB_ICONINFORMATION = 0x00000040
+MB_ICONERROR = 0x00000010
+MB_SETFOREGROUND = 0x00010000
+MB_TOPMOST = 0x00040000
+
+
+def message(title: str, text: str, *, error: bool = False) -> None:
+    """原生信息框；从托盘工作线程调用不会卡住托盘消息循环。"""
+    user32 = _user32()
+    user32.MessageBoxW.argtypes = [
+        wintypes.HWND,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.UINT,
+    ]
+    user32.MessageBoxW.restype = ctypes.c_int
+    icon = MB_ICONERROR if error else MB_ICONINFORMATION
+    user32.MessageBoxW(None, text, title, icon | MB_SETFOREGROUND | MB_TOPMOST)

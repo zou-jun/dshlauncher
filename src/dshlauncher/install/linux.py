@@ -19,8 +19,8 @@ DESKTOP_NAME = "dsh"
 ICON_NAME = "dshlauncher"
 ICON_SIZE = 256
 
-#: 动作 -> 文件名后缀；空后缀即默认 open。
-ENTRIES = {"open": "", "ui": "-ui"}
+#: 动作 -> 文件名后缀；空后缀即默认入口（托盘 + 打开窗口）。
+ENTRIES = {"tray": ""}
 
 #: 旧版本写过的位置/名字，install 与 uninstall 都顺手清理。
 LEGACY_NAMES = ("dsh.desktop", "dshlauncher.desktop", "dsh-ui.desktop", "dshlauncher-ui.desktop")
@@ -78,7 +78,7 @@ def install_icon(icon: Path | None) -> Path | None:
 
 def _entry(action: str, icon: Path | None) -> str:
     command = shlex.join([*gui_command(), action])
-    label = f"{DESKTOP_NAME} 控制台" if action == "ui" else DESKTOP_NAME
+    label = DESKTOP_NAME
     lines = [
         "[Desktop Entry]",
         "Type=Application",

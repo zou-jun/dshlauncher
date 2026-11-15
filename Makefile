@@ -14,7 +14,7 @@ CLI  := $(PY) -m dshlauncher
 ARGS ?=
 
 .DEFAULT_GOAL := help
-.PHONY: help env lint format fmt-check test check run start stop restart status doctor ui smoke build deploy clean distclean
+.PHONY: help env lint format fmt-check test check run start stop restart status doctor tray smoke build deploy clean distclean
 
 help:  ## 列出全部目标
 	@$(PY) -c "import pathlib,re;[print(f'  {m[1]:<10}{m[2]}') for m in (re.match(r'^([a-z][a-z-]*):.*?##\s*(.+)', l.rstrip()) for l in pathlib.Path('Makefile').read_text('utf-8').splitlines()) if m]"
@@ -39,7 +39,7 @@ test:  ## 跑单测；可透传：make test ARGS="-k port -q"
 
 check: lint fmt-check test  ## 提交前一条命令
 
-run:  ## 确保服务在跑并打开窗口（等同双击 exe）
+run:  ## 确保服务在跑并打开窗口（不常驻托盘）
 	@$(CLI) open
 
 start:  ## 只启动服务
@@ -57,8 +57,8 @@ status:  ## 查看服务 PID / 端口 / token URL
 doctor:  ## 依赖发现与端口自检
 	@$(CLI) doctor
 
-ui:  ## tkinter 控制面板
-	@$(CLI) ui
+tray:  ## 前台运行系统托盘（双击 exe 的等价形态，Ctrl+C 退出）
+	@$(CLI) tray
 
 smoke:  ## 真机冒烟：start → status → stop
 	@$(CLI) start

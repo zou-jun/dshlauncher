@@ -21,7 +21,7 @@ def _entry(action: str, icon: Path | None) -> str:
     lines = [
         "[Desktop Entry]",
         "Type=Application",
-        f"Name={DESKTOP_NAME}{' 控制台' if action == 'ui' else ''}",
+        f"Name={DESKTOP_NAME}",
         "Comment=托管 dsh web 服务并打开无扩展 UI 窗口",
         f"Exec={command}",
         "Terminal=false",
@@ -43,7 +43,7 @@ def create(icon: Path | None = None) -> list[Path]:
     written: list[Path] = []
     for directory in _targets():
         directory.mkdir(parents=True, exist_ok=True)
-        for action, suffix in (("open", ""), ("ui", "-ui")):
+        for action, suffix in (("tray", ""),):
             path = directory / f"dsh{suffix}.desktop"
             path.write_text(_entry(action, icon), "utf-8")
             path.chmod(path.stat().st_mode | stat.S_IXUSR)

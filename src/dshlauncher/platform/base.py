@@ -9,6 +9,7 @@
 - ``window_rect(hwnd)`` / ``apply_rect(hwnd, rect)``：读写窗口矩形
 - ``is_minimized(hwnd)`` / ``present(hwnd)``：最小化判定与置前
 - ``open_path(path)``：用系统默认程序打开文件
+- ``message(title, text, *, error=False)``：弹出原生信息框；``error`` 用错误图标/紧急通知
 - ``supports_window_control(ozone)``：当前会话能否枚举/移动/置前窗口
 
 Linux 由 ``linux`` 后端用 X11/EWMH 实现；原生 Wayland 下返回 False，
@@ -43,6 +44,8 @@ class Backend(Protocol):
     def present(self, hwnd: int) -> None: ...
 
     def open_path(self, path: Path) -> None: ...
+
+    def message(self, title: str, text: str, *, error: bool = False) -> None: ...
 
 
 __all__ = ["Backend", "Rect"]

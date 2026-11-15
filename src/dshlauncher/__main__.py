@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import os
-import subprocess
 import sys
 import unicodedata
 from pathlib import Path
@@ -26,7 +25,7 @@ def pad(text: str, width: int) -> str:
 def _attach_parent_console() -> None:
     """窗口化 exe 从终端启动时接管父进程控制台，让 print 有地方可写。
 
-    没有参数（双击）时不接管：保持"无窗口"启动，错误走 MessageBox。
+    双击时父进程是资源管理器，没有控制台，AttachConsole 失败后保持无窗口启动。
     """
     if sys.platform != "win32" or sys.stdout is not None:
         return
@@ -85,6 +84,12 @@ def _emit(text: str) -> None:
     _audit(text)
 
 
+def _gui_error(text: str) -> None:
+    """没有控制台时的错误出口：交给平台后端弹原生错误框 / 紧急通知。"""
+    with contextlib.suppress(Exception):
+        platform.load().message("dshlauncher", text, error=True)
+
+
 def _report_error(exc: BaseException) -> None:
     text = f"{type(exc).__name__}: {exc}"
     if sys.stdout is not None:
@@ -97,25 +102,7 @@ def _report_error(exc: BaseException) -> None:
             tty = sys.stdout.isatty()
         if tty:
             return
-    elif not sys.platform.startswith("linux"):
-        # Windows 窗口化 exe：没有 stdout，只能用对话框。
-        with contextlib.suppress(Exception):
-            import tkinter as tk
-            from tkinter import messagebox
-
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showerror("dshlauncher", text, parent=root)
-            root.destroy()
-        return
-
-    # Linux 从 .desktop 启动时没有终端，错误只能走桌面通知。
-    with contextlib.suppress(OSError):
-        subprocess.run(
-            ["notify-send", "--urgency=critical", "dshlauncher", text],
-            check=False,
-            timeout=5,
-        )
+    _gui_error(text)
 
 
 def _settings(args: argparse.Namespace) -> settings_mod.Settings:
@@ -151,21 +138,26 @@ def _window_control_text(backend, ozone: str) -> str:  # noqa: ANN001 - 平台�
     return "不可用"
 
 
-def _tk_text() -> str:
+def _tray_text() -> str:
     try:
-        import tkinter as tk
-        from tkinter import font as tkfont
+        import pystray
 
-        root = tk.Tk()
-        root.withdraw()
-    except Exception as exc:  # noqa: BLE001 - doctor 要展示失败原因
+        backend = pystray.Icon.__module__.rsplit(".", 1)[-1]
+        from .tray import icon_image
+
+        image = icon_image()
+    except Exception as exc:  # noqa: BLE001 - doctor 要展示具体原因
         return f"不可用: {exc}"
-    try:
-        if tkfont.nametofont("TkDefaultFont").measure("窗口") > 0:
-            return f"可用 (Tk {tk.TkVersion})"
-        return f"Tk {tk.TkVersion} 缺少中文字形（无 Xft），控制面板将使用英文标签"
-    finally:
-        root.destroy()
+    return f"可用（后端 {backend}，图标 {image.width}×{image.height}）"
+
+
+def _tray_process_text() -> str:
+    from . import tray
+
+    found = tray.running()
+    if found is None:
+        return "未运行"
+    return f"运行中 pid={found[0]}，IPC 127.0.0.1:{found[1]}"
 
 
 def _cmd_open(args: argparse.Namespace) -> int:
@@ -222,7 +214,8 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         ("平台", f"{sys.platform} / backend {backend.__name__.rsplit('.', 1)[-1]}"),
         ("会话", _session_text()),
         ("窗口控制", _window_control_text(backend, settings.ozone)),
-        ("tkinter", _tk_text()),
+        ("托盘", _tray_text()),
+        ("托盘进程", _tray_process_text()),
         ("Python", f"{sys.version.split()[0]}  {sys.executable}"),
         ("数据目录", str(paths.data_dir())),
         ("配置文件", f"{config}  ({'存在' if config.is_file() else '不存在，全部走默认值'})"),
@@ -260,11 +253,10 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_ui(args: argparse.Namespace) -> int:
-    from . import ui_panel
+def _cmd_tray(args: argparse.Namespace) -> int:
+    from . import tray
 
-    ui_panel.run(_settings(args))
-    return 0
+    return tray.run(_settings(args))
 
 
 def _cmd_install(args: argparse.Namespace) -> int:
@@ -291,7 +283,7 @@ HANDLERS = {
     "restart": _cmd_restart,
     "status": _cmd_status,
     "doctor": _cmd_doctor,
-    "ui": _cmd_ui,
+    "tray": _cmd_tray,
     "install": _cmd_install,
     "uninstall": _cmd_uninstall,
     "version": _cmd_version,
@@ -335,7 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("restart", "重启服务（dsh 升级后执行）"),
         ("status", "查看服务状态"),
         ("doctor", "打印依赖发现结果与运行状态"),
-        ("ui", "打开 tkinter 控制面板"),
+        ("tray", "启动系统托盘（双击 exe 时的行为）"),
         ("uninstall", "删除桌面入口"),
         ("version", "打印版本"),
     ):
@@ -352,14 +344,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    if sys.argv[1:] if argv is None else argv:
-        _attach_parent_console()
+    _attach_parent_console()
     _utf8_streams()
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command is None:
-        # 直接双击 exe 时等同于 open。
-        args = parser.parse_args(["open"])
+        # 直接双击 exe：打开窗口并常驻托盘。
+        args = parser.parse_args(["tray"])
     try:
         return args.handler(args)
     except Exception as exc:  # noqa: BLE001 - 统一转成提示 + 退出码

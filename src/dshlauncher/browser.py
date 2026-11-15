@@ -120,16 +120,19 @@ def launch(settings: Settings, url: str) -> str:
 
     profile.mkdir(parents=True, exist_ok=True)
     args = build_args(settings, browser, url, target, window_control=window_control)
-    subprocess.Popen(
-        args,
-        cwd=str(browser.path.parent),
-        env=paths.child_env(),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        close_fds=True,
-        **backend.detach_kwargs(),
-    )
+    kwargs = {
+        "cwd": str(browser.path.parent),
+        "env": paths.child_env(),
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+    }
+    try:
+        subprocess.Popen(args, **kwargs, **backend.detach_kwargs())
+    except OSError:
+        # 当前 job 不允许 breakaway（例如从受限任务启动托盘）时退回普通分离。
+        subprocess.Popen(args, **kwargs, **backend.detach_kwargs(breakaway=False))
 
     if window_control:
         hwnd = _wait_window(profile, names)

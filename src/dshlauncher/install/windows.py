@@ -9,16 +9,16 @@ from pathlib import Path
 
 CREATE_NO_WINDOW = 0x08000000
 
-#: 动作 -> 快捷方式文件名（短名，桌面上不占地方）
+#: 动作 -> 快捷方式文件名（短名，桌面上不占地方）；无参数即托盘 + 打开窗口
 LINK_NAMES = {
-    "open": "dsh.lnk",
-    "ui": "dsh 控制台.lnk",
+    "tray": "dsh.lnk",
 }
 
 #: 改名前的旧快捷方式：install / uninstall 都顺手清掉，避免桌面上留两套
 LEGACY_NAMES = (
     "DeepSeek Harness.lnk",
     "DeepSeek Harness 控制台.lnk",
+    "dsh 控制台.lnk",
 )
 
 

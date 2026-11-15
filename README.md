@@ -2,7 +2,8 @@
 
 托管 `dsh web` 服务，并在**独立的 Chromium 用户配置**里打开一个无浏览器扩展的应用窗口。
 
-- 服务以分离进程运行：关掉终端、关掉启动器都不影响它
+- 服务以分离进程运行：关掉终端、关掉 dsh 窗口都不影响它；只有托盘菜单的「退出并停止服务」会显式停掉
+- 双击进入系统托盘：窗口照常打开，图标常驻；右键菜单里能打开窗口、停/重启服务、看日志
 - 窗口用 `--user-data-dir` + `--app`：没有地址栏，也不会带上你日常浏览器的那堆扩展
 - `start / stop / restart / status` 齐全，`doctor` 打印解析到的依赖、数据目录和端口占用
 - Windows 完整支持；Linux 完整支持（X11 / XWayland，见「平台差异」）；macOS 尽力而为
@@ -17,14 +18,15 @@
 
 | 启动方式 | 行为 |
 |---|---|
-| 双击 exe / 快捷方式（无参数） | 等同 `open`：确保服务在跑并打开窗口，不闪黑窗 |
+| 双击 exe / 桌面快捷方式 | 等同 `tray`：确保服务在跑、打开窗口，并常驻系统托盘 |
 | 终端里带参数 | CLI：自动接管父控制台，`doctor`、`status` 等输出直接显示 |
 | `.dshlauncher/` | 首次运行自动生成的运行时数据（exe 同级） |
 
 ```bat
 dshlauncher.exe doctor         :: 自检：依赖、路径、端口
-dshlauncher.exe install        :: 在桌面创建 dsh.lnk / dsh 控制台.lnk
-dshlauncher.exe                :: 等同 open
+dshlauncher.exe install        :: 在桌面创建 dsh.lnk
+dshlauncher.exe                :: 打开窗口并驻留托盘
+dshlauncher.exe open           :: 只打开/置前窗口，不驻留托盘
 ```
 
 > GUI 子系统的 exe 由 `cmd.exe` 启动时不会阻塞提示符，输出会稍后出现在同一个控制台里。
@@ -37,7 +39,7 @@ dshlauncher.exe                :: 等同 open
 ```bash
 ./dshlauncher doctor        # 自检：会话类型、依赖、窗口控制能力、端口
 ./dshlauncher install       # 写入 ~/.local/share/applications 与图标
-./dshlauncher               # 等同 open
+./dshlauncher               # 打开窗口并驻留托盘
 ```
 
 `install` 只写应用菜单（GNOME 默认不显示桌面图标），不会碰 `~/Desktop`。
@@ -45,11 +47,13 @@ dshlauncher.exe                :: 等同 open
 ### 源码运行
 
 需要 uv、Python 3.12+、Node.js，以及一个 Chromium 系浏览器（Chrome / Edge / Chromium / Brave）。
-`ui` 面板需要 tkinter：uv 管理的 Python 自带；系统 Python 需另装（Arch `tk` / Debian `python3-tk`）。
+托盘由 pystray 提供（`uv sync` 已装）；Linux 还要求桌面有可用的 AppIndicator / GTK / X11 后端，
+没有时 `tray` 会明确报错，CLI 不受影响。
 
 ```bash
 uv sync
 uv run python -m dshlauncher doctor
+uv run python -m dshlauncher          # 前台运行托盘（Ctrl+C 退出并停服务）
 uv run python -m dshlauncher open
 ```
 
@@ -57,15 +61,26 @@ uv run python -m dshlauncher open
 
 | 命令 | 作用 |
 |---|---|
-| `open`（默认） | 确保服务在跑，然后打开或置前窗口 |
+| `tray`（默认 / 双击） | 前台运行系统托盘：确保服务在跑、打开/置前窗口；Ctrl+C 退出并停服务 |
+| `open` | 只确保服务并打开/置前窗口，不启动托盘 |
 | `start` / `stop` / `restart` | 只操作服务；已在跑时 `start` 直接复用，显式换端口会先停掉旧实例；`dsh` 升级后用 `restart` |
 | `status` | 服务 PID、端口、token URL、路径 |
-| `doctor` | 依赖发现结果、平台后端、端口占用者、配置来源 |
-| `ui` | tkinter 控制面板（缺 tk 时自动退化为终端菜单） |
+| `doctor` | 依赖发现结果、平台后端、托盘后端与进程、端口占用者、配置来源 |
 | `install` / `uninstall` | 创建 / 删除桌面入口 |
 | `version` | 版本号 |
 
 通用参数：`--host --port --cwd --node --dsh-bin --browser --ozone --profile-dir --no-dedupe --start-timeout`。
+
+### 托盘菜单
+
+| 菜单项 | 作用 |
+|---|---|
+| 打开窗口 | 确保服务在跑并打开/置前窗口；左键单击图标等价于此 |
+| 服务状态：运行中/未运行… | 点击弹窗显示 PID、端口、URL、工作目录、数据目录与日志路径 |
+| 停止服务 / 重启服务 | 直接操作 dsh 服务 |
+| 刷新状态 | 重新读取状态并刷新菜单（外部 `start` / `stop` 后手动点一下） |
+| 查看日志 / 打开数据目录 | 打开 `dsh-web.log` / 数据目录 |
+| 退出并停止服务 | 先停 dsh，再移除托盘图标；已打开的窗口保留 |
 
 ## 数据与配置
 
@@ -78,6 +93,7 @@ uv run python -m dshlauncher open
 | `dsh-web.log` | 服务输出，含每次启动的 `[launcher] start` 标记与 token URL |
 | `launcher.log` | 启动器动作审计 |
 | `browser/` | 专用浏览器配置（零扩展；cookie 绑定 host:port） |
+| `tray.lock` / `tray.json` | 托盘单实例锁与 loopback IPC 端口/随机 token（正常退出时删除，被强杀后下次启动自动清理） |
 | `config.toml` | 可选配置文件 |
 
 配置优先级：**命令行参数 > 环境变量 `DSHLAUNCHER_*` > `config.toml` > 默认值**。
@@ -157,6 +173,7 @@ $env:DSHLAUNCHER_BROWSER = "edge"
 | 能力 | Windows | Linux / X11 会话 | Linux / Wayland 会话 |
 |---|---|---|---|
 | 服务脱离终端 | `DETACHED_PROCESS` + breakaway | `start_new_session` | `start_new_session` |
+| 系统托盘 | pystray `_win32` | pystray `_xorg`（`python-xlib`） | `AppIndicator` / `GTK`，或 XWayland（需 `DISPLAY`） |
 | 窗口枚举 / 置前 | Win32 | EWMH（`_NET_CLIENT_LIST` / `_NET_ACTIVE_WINDOW`） | 默认不可用；`--ozone x11` 时与 X11 相同 |
 | 尺寸 / 位置纠正 | 工作区 + `SetWindowPos` | `_NET_WORKAREA` + `XMoveResizeWindow` | 默认只传 `--window-size`；`--ozone x11` 时与 X11 相同 |
 | 已有窗口去重 | 枚举 + 置前 | 枚举 + 置前 | 默认无法置前，每次 `open` 新开窗口 |
@@ -203,7 +220,7 @@ make build      # 打包并部署到 app/
 ```
 
 其余目标见 `make help`：`format`、`test ARGS="-k port"`、`start` / `stop` / `restart` /
-`status` / `doctor` / `ui` / `run`、`deploy`、`clean`、`distclean`。
+`status` / `doctor` / `tray` / `run`、`deploy`、`clean`、`distclean`。
 
 Windows 上用 MSYS2 自带的 make：`pacman -S make`，再把 `C:\msys64\usr\bin` **追加**到用户 `PATH`
 （不要前置——那会让所有终端优先用上 MSYS2 的 `find` / `sort` / `tar`）。同一目录下的 `sh`、`git`、
@@ -229,7 +246,7 @@ make deploy         # 只重新部署（复用上次构建）
 必须在目标平台上各自构建（PyInstaller 不交叉编译）；`app/` 是部署目录，`app/.dshlauncher/`
 的数据不会被构建清理。
 
-> 部署前先关掉应用窗口、`stop` 服务：窗口打开时 `_internal` 里的 DLL 被占用，
+> 部署前先退出托盘（右键 → 退出并停止服务）、关掉应用窗口：窗口打开时 `_internal` 里的 DLL 被占用，
 > 覆盖会失败（脚本会给出这条提示）。
 
 ## 测试与检查
@@ -240,18 +257,20 @@ uv run ruff check .      # lint
 uv run ruff format .     # 格式化
 ```
 
-只覆盖纯逻辑：token URL 的标记过滤、窗口几何钳制、配置优先级、依赖候选解析。
+只覆盖纯逻辑：token URL 的标记过滤、窗口几何钳制、配置优先级、依赖候选解析、托盘单实例与 IPC。
 
 ## 故障排查
 
-- **窗口里是 401**：服务重启过而窗口还拿着旧 token —— 关掉窗口重新点图标。
+- **窗口里是 401**：服务重启过而窗口还拿着旧 token —— 关掉窗口，再点托盘「打开窗口」或重新双击。
+- **双击后托盘区看不到图标**：Windows 11 默认把新图标收进溢出区，点任务栏的 `^` 固定一次即可；
+  Linux 需要桌面提供 AppIndicator / GTK / X11 后端，`doctor` 的「托盘」与「托盘进程」行会给出后端、PID 与 IPC 端口。
+- **托盘菜单里的状态没跟着变**：菜单标签只在托盘动作完成后刷新；外部 `start` / `stop` 之后点「刷新状态」即可。
+  「服务状态」弹窗每次点击都重新读取；tooltip 每 2 秒自动更新。
 - **终端里中文乱码**：输出编码跟随控制台代码页——936（GBK）控制台保持默认编码，65001 才用 UTF-8；显式设置 `PYTHONIOENCODING` / `PYTHONUTF8` 时以你的设置为准。PowerShell 5.1 默认 936，想让会话统一 UTF-8 可在 `$PROFILE` 里设 `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)`。
 - **端口被占或被系统保留**：`doctor` 的「端口」行会区分 `被占用` / `系统保留（区间）`，占用时还会打印占用者的 pid 与命令行。默认端口会自动回退；显式 `--port` 撞上保留段会直接报错并给出可换端口，`netsh interface ipv4 show excludedportrange protocol=tcp` 可查看全部保留段。
 - **`dsh` 升级后行为不对**：`restart`。
 - **找不到依赖**：`doctor` 逐项列出 node / dsh / 浏览器，缺哪个补哪个，或用 `--node / --dsh-bin / --browser` 指定。
 - **Linux 上点了图标窗口没有置前**：当前是原生 Wayland，属协议限制；用 `--ozone x11` 重开。切换前先关掉旧窗口（Chrome 单实例会忽略新启动参数）。
-- **控制面板按钮没有文字**：uv / PyInstaller 自带的 Tk 是 `no-xft` 构建，只有核心 X 字体，中文宽度为 0；
-  `ui` 检测到后自动改用英文标签与英文状态（`doctor` 的 `tkinter` 行会注明）。
 - **双击时提示端口占用**：若 3080 上是手动启动的 `dsh web`，`open` 会停止它并接管重启（token 只存在于它的 stdout，无法复用）；
   占用者是其它程序时才会报错。
 - **Linux 上 `dsh` 找不到**：`doctor` 会打印实际解析路径；`~/.local/bin/dsh` 符号链接、npm/pnpm 全局目录都已覆盖，仍失败时用 `DSHLAUNCHER_DSH_BIN` 指定 `lib/bin.js`。

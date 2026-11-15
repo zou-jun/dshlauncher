@@ -9,14 +9,17 @@ description = "DeepSeek Harness 启动器：托管 dsh web 服务并在无扩展
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-dependencies = ["psutil>=6.0"]
+dependencies = [
+    "pillow>=13.0.0",
+    "psutil>=6.0",
+    "pystray>=0.19",
+]
 
 [project.scripts]
 dshlauncher = "dshlauncher.__main__:main"
 
 [dependency-groups]
 dev = [
-    "pillow>=13.0.0",
     "pyinstaller>=6.6",
     "pytest>=8.0",
     "ruff>=0.7",
