@@ -217,7 +217,7 @@ def test_controller_reports_starting(paths_: paths.Paths) -> None:
     context = _context(paths_, SimpleNamespace())
     controller = tray.TrayController(context)
     controller._starting.set()
-    assert controller.status_short() == "启动中…"
+    assert controller.status_short() == "启动中"
     assert controller.status_tooltip() == "正在启动服务…"
     controller._starting.clear()
     assert controller.status_short() == "未运行"

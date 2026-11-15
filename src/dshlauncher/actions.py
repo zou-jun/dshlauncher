@@ -39,7 +39,8 @@ def open_dsh(context: Context) -> str:
             raise RuntimeError("服务已启动但日志里没有 token URL，请查看日志：" + str(context.paths.log))
         splash.ready(url)
         delivered = splash.wait_delivered(10.0)
-        delay = 1.0 if delivered else 5.0
+        # 页面还没取到 ready 时多留一会儿：首次启动 Chrome 可能很慢。
+        delay = 1.0 if delivered else 30.0
         return f"pid={state.pid} started={started} window={window}"
     except Exception as exc:
         splash.fail(f"{type(exc).__name__}: {exc}")

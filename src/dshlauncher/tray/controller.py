@@ -48,7 +48,7 @@ class TrayController:
             return work()
 
     def status_short(self) -> str:
-        return "启动中…" if self._starting.is_set() else state_text(self.service)
+        return "启动中" if self._starting.is_set() else state_text(self.service)
 
     def status_tooltip(self) -> str:
         return "正在启动服务…" if self._starting.is_set() else status_text(self.service)

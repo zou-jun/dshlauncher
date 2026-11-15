@@ -89,6 +89,25 @@ def test_open_uses_splash_when_service_not_live(tmp_path: Path, monkeypatch: pyt
     assert "pid=9 started=True" in result
 
 
+def test_open_keeps_splash_alive_when_page_has_not_loaded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = State(pid=9, create_time=1.0, port=18080, url="http://dsh/?token=x")
+    controller = SimpleNamespace(
+        read_state=lambda: None,
+        live_process=lambda value: None,
+        ensure=lambda: (state, True),
+        latest_url=lambda: None,
+    )
+    monkeypatch.setattr(actions, "SplashServer", FakeSplash)
+    monkeypatch.setattr(actions.browser, "launch", lambda settings, url, **kwargs: "new")
+    monkeypatch.setattr(FakeSplash, "wait_delivered", lambda self, timeout: False)
+
+    actions.open_dsh(_context(tmp_path, controller))
+
+    assert FakeSplash.instances[-1].closed == 30.0
+
+
 def test_open_skips_splash_when_service_already_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state = State(pid=9, create_time=1.0, port=18080, url="http://dsh/?token=x")
     controller = SimpleNamespace(
