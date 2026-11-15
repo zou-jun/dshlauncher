@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import ModuleType
 
 import psutil
 
@@ -32,8 +33,13 @@ def _profile_pids(profile_dir: Path, names: set[str]) -> set[int]:
     return pids
 
 
-def _wait_window(profile_dir: Path, names: set[str], timeout: float = WINDOW_TIMEOUT) -> int | None:
-    backend = platform.load()
+def _wait_window(
+    profile_dir: Path,
+    names: set[str],
+    *,
+    backend: ModuleType,
+    timeout: float = WINDOW_TIMEOUT,
+) -> int | None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         hwnd = backend.find_window(_profile_pids(profile_dir, names))
@@ -43,11 +49,10 @@ def _wait_window(profile_dir: Path, names: set[str], timeout: float = WINDOW_TIM
     return None
 
 
-def _settle(hwnd: int, target: Rect | None) -> None:
+def _settle(hwnd: int, target: Rect | None, *, backend: ModuleType) -> None:
     """窗口过小或跑出屏幕时纠正成默认比例；用户自己调好的尺寸不动。"""
     if target is None:
         return
-    backend = platform.load()
     work = backend.work_area()
     if work is None:
         return
@@ -96,13 +101,13 @@ def build_args(
     return args
 
 
-def launch(settings: Settings, url: str) -> str:
+def launch(settings: Settings, url: str, *, backend: ModuleType | None = None) -> str:
     """打开应用窗口；已有窗口时只置前。返回 ``new`` 或 ``focused``。
 
     原生 Wayland（``ozone=auto`` / ``wayland``）没有可用的窗口控制 API，
     dedupe 与尺寸纠正在该模式下不生效，只能每次都新开窗口。
     """
-    backend = platform.load()
+    backend = backend or platform.load()
     browser = discovery.browser_exe(settings.browser)
     names = backend.process_names(browser.family)
     profile = settings.profile_dir
@@ -114,7 +119,7 @@ def launch(settings: Settings, url: str) -> str:
     if settings.dedupe and window_control:
         existing = backend.find_window(_profile_pids(profile, names))
         if existing is not None:
-            _settle(existing, target)
+            _settle(existing, target, backend=backend)
             backend.present(existing)
             return "focused"
 
@@ -135,7 +140,7 @@ def launch(settings: Settings, url: str) -> str:
         subprocess.Popen(args, **kwargs, **backend.detach_kwargs(breakaway=False))
 
     if window_control:
-        hwnd = _wait_window(profile, names)
+        hwnd = _wait_window(profile, names, backend=backend)
         if hwnd is not None:
-            _settle(hwnd, target)
+            _settle(hwnd, target, backend=backend)
     return "new"

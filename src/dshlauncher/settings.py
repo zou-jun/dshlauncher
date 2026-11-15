@@ -34,6 +34,8 @@ class Settings:
     browser: str | None = None
     ozone: str = "auto"
     profile_dir: Path = field(default_factory=paths.profile_dir)
+    #: profile_dir 是否来自 CLI / 环境变量 / config.toml：否则跟随运行时 Paths。
+    profile_explicit: bool = False
     width_ratio: float = geometry.WIDTH_RATIO
     height_ratio: float = geometry.HEIGHT_RATIO
     min_width: int = geometry.MIN_WIDTH
@@ -102,7 +104,8 @@ def load(
     defaults = Settings()
 
     resolved_work_dir = work_dir or _env("CWD") or cfg.get("work_dir")
-    resolved_profile = profile_dir or _env("PROFILE_DIR") or cfg.get("profile_dir")
+    profile_value = profile_dir or _env("PROFILE_DIR") or cfg.get("profile_dir")
+    resolved_profile = profile_value
     resolved_ozone = _ozone(ozone or _env("OZONE") or cfg.get("ozone") or defaults.ozone)
     # --port 0 表示交给系统分配，不能用 `or` 判断（0 也是有效值）。
     requested_port = port if port is not None else _env("PORT") or cfg.get("port")
@@ -125,6 +128,7 @@ def load(
         browser=str(browser or _env("BROWSER") or cfg.get("browser") or "") or None,
         ozone=resolved_ozone,
         profile_dir=Path(resolved_profile).expanduser() if resolved_profile else defaults.profile_dir,
+        profile_explicit=profile_value is not None,
         width_ratio=float(
             os.environ.get(ENV_PREFIX + "WIDTH_RATIO") or window.get("width_ratio") or defaults.width_ratio
         ),

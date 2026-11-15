@@ -3,40 +3,28 @@
 from __future__ import annotations
 
 import contextlib
-import json
-import os
-import re
 import socket
 import subprocess
 import time
-from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlsplit
+from types import ModuleType
 
 import psutil
 
-from . import discovery, paths, platform, ports
+from . import discovery, logs, paths, platform, ports
+from . import state as state_mod
+from .logs import START_MARKER
+from .paths import Paths
 from .settings import Settings
+from .state import State
+from .status import ServiceStatus
 
-#: 每次启动写入日志的标记行；只有它之后的 URL 属于当前进程（token 每进程都变）。
-START_MARKER = "[launcher] start"
-URL_PATTERN = re.compile(r"dsh web: (https?://\S+)")
 BIN_JS_MARKER = "@deepseek-ai/dsh/lib/bin.js"
 #: 外部手动启动的 dsh 可能是 PATH 上的 shim（符号链接/脚本），不一定带 bin.js 路径。
 DSH_NAMES = {"dsh", "dsh.cmd", "dsh.exe", "dsh.js"}
 
 STOP_TIMEOUT = 10.0
-LOG_ROTATE_BYTES = 5 * 1024 * 1024
-TAIL_BYTES = 256 * 1024
-
-
-@dataclass
-class State:
-    pid: int
-    create_time: float
-    port: int
-    url: str | None = None
 
 
 def is_dsh_cmdline(cmdline: str) -> bool:
@@ -57,64 +45,33 @@ def is_dsh_cmdline(cmdline: str) -> bool:
 
 
 def parse_url(text: str) -> str | None:
-    """取最后一个启动标记之后的 token URL（标记之前的是上一个进程的）。"""
-    marker = text.rfind(START_MARKER)
-    if marker != -1:
-        text = text[marker:]
-    matches = URL_PATTERN.findall(text)
-    return matches[-1] if matches else None
+    return logs.parse_url(text)
 
 
 def url_port(url: str) -> int | None:
-    """URL 里的端口；解析失败返回 None。"""
-    try:
-        return urlsplit(url).port
-    except ValueError:
-        return None
+    return logs.url_port(url)
 
 
 def startup_failure(text: str, lines: int = 12) -> str:
-    """捞出本次启动的失败原因，而不是把日志尾部整块丢给用户。
-
-    dsh 失败时会先打印 ``dsh: startup failed`` 块（真正的 EOF 原因），随后才是
-    「插件在等某个服务」的长表；只 tail 最后几行必然只剩后者。
-    """
-    marker = text.rfind(START_MARKER)
-    if marker != -1:
-        text = text[marker:]
-    rows = text.splitlines()
-    for index, row in enumerate(rows):
-        if "startup failed" in row:
-            block: list[str] = []
-            for line in rows[index:]:
-                stripped = line.strip()
-                # 失败块之后是「插件在等某个服务」的长表和诊断路径，都不是原因。
-                if stripped.startswith(("Plugins waiting", "Full diagnostics")):
-                    break
-                if stripped.startswith("at "):
-                    continue
-                if not stripped and block and not block[-1].strip():
-                    continue
-                block.append(line)
-                if len(block) >= lines:
-                    break
-            return "\n".join(block).strip()
-    return "\n".join(rows[-lines:]).strip()
+    return logs.startup_failure(text, lines)
 
 
 class Service:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        paths_: Paths | None = None,
+        backend: ModuleType | None = None,
+    ) -> None:
         self.settings = settings
-        self.backend = platform.load()
-        #: 本次实际使用的端口；首次访问时解析（显式端口原样，默认端口自动回退）。
-        self._port: int | None = None
+        self.paths = paths_ or Paths.current()
+        self.backend = backend or platform.load()
 
     # ── 端口 ──────────────────────────────────────────────────────────
     def effective_port(self) -> int:
-        """本次会用的端口，不启动服务（`status` / `doctor` 也用它）。"""
-        if self._port is None:
-            self._port = self._plan_port()
-        return self._port
+        """本次会用的端口，不启动服务；不缓存，读操作不改实例状态。"""
+        return self._plan_port()
 
     def _plan_port(self, exclude: frozenset[int] = frozenset()) -> int:
         if self.settings.port_explicit:
@@ -152,39 +109,19 @@ class Service:
             return False
 
     def read_state(self) -> State | None:
-        try:
-            data = json.loads(paths.state_path().read_text("utf-8"))
-            return State(int(data["pid"]), float(data["create_time"]), int(data["port"]), data.get("url"))
-        except (OSError, ValueError, KeyError, TypeError):
-            return None
+        return state_mod.read_state(self.paths.state)
 
     def write_state(self, state: State) -> None:
-        paths.ensure_data_dir()
-        paths.write_atomic(paths.state_path(), json.dumps(asdict(state), indent=2))
+        state_mod.write_state(self.paths.state, state)
 
     def _log_text(self) -> str:
-        """日志尾部（最多 TAIL_BYTES），覆盖最近一次启动。"""
-        try:
-            with paths.log_path().open("rb") as handle:
-                handle.seek(0, os.SEEK_END)
-                size = handle.tell()
-                handle.seek(max(0, size - TAIL_BYTES))
-                return handle.read().decode("utf-8", "replace")
-        except OSError:
-            return ""
+        return logs.tail_text(self.paths.log)
 
     def latest_url(self) -> str | None:
-        return parse_url(self._log_text())
+        return logs.parse_url(self._log_text())
 
     def _rotate_log(self) -> None:
-        log = paths.log_path()
-        try:
-            if log.exists() and log.stat().st_size > LOG_ROTATE_BYTES:
-                rotated = log.with_suffix(".log.1")
-                rotated.unlink(missing_ok=True)
-                log.replace(rotated)
-        except OSError:
-            pass
+        logs.rotate(self.paths.log)
 
     # ── 进程判定 ──────────────────────────────────────────────────────
     @staticmethod
@@ -206,19 +143,6 @@ class Service:
         except psutil.Error:
             return None
         return proc if self._is_dsh_process(proc) else None
-
-    def dsh_processes(self) -> list[psutil.Process]:
-        """命令行匹配 dsh web 的进程（清理无 state 的残留）。"""
-        found: list[psutil.Process] = []
-        for proc in psutil.process_iter(["pid", "cmdline"]):
-            try:
-                cmdline = proc.info.get("cmdline") or []
-            except psutil.Error:
-                continue
-            joined = " ".join(str(part) for part in cmdline)
-            if is_dsh_cmdline(joined):
-                found.append(proc)
-        return found
 
     def port_owner_process(self, port: int | None = None) -> psutil.Process | None:
         """监听该端口的进程（无法获取时返回 None）。"""
@@ -264,7 +188,6 @@ class Service:
     # ── 生命周期 ──────────────────────────────────────────────────────
     def _reuse(self, state: State) -> State:
         """复用已在运行的实例：刷新 token URL，必要时等它重新就绪。"""
-        self._port = state.port
         if not state.url:
             state.url = self.latest_url()
         if not self.port_open(state.port):
@@ -281,22 +204,21 @@ class Service:
                 return self._reuse(existing)
             # 显式要求换个端口：先停掉旧实例，别把它留成孤儿。
             self.stop()
-        self._port = None
 
         port = self.effective_port()
         verdict = ports.probe(self.settings.host, port)
         if verdict.in_use:
             owner = self.port_owner_process(port)
             if owner is not None and self._is_dsh_process(owner):
-                paths.audit(f"takeover: 端口 {port} 上的外部 dsh web pid={owner.pid}")
+                self.paths.audit(f"takeover: 端口 {port} 上的外部 dsh web pid={owner.pid}")
                 self._kill_tree(owner.pid)
                 self._wait_port_closed(port)
                 verdict = ports.probe(self.settings.host, port)
             if not verdict.free and not self.settings.port_explicit:
                 # 旧实例的监听句柄可能被它的子进程继承，端口迟迟不释放：换候选。
-                self._port = self._plan_port(frozenset({port}))
-                paths.audit(f"port: {port} 仍被占用，改用 {self._port}")
-                port = self._port
+                previous = port
+                port = self._plan_port(frozenset({port}))
+                self.paths.audit(f"port: {previous} 仍被占用，改用 {port}")
                 verdict = ports.probe(self.settings.host, port)
         if verdict.reserved:
             raise RuntimeError(
@@ -307,7 +229,7 @@ class Service:
                 f"端口 {port} 已被其它进程占用：{self.port_owner(port) or '未知'}\n"
                 "请先停止该实例，或用 --port / DSHLAUNCHER_PORT 换一个端口。"
             )
-        paths.ensure_data_dir()
+        self.paths.ensure()
         self._rotate_log()
         node = discovery.node_exe(self.settings.node)
         bin_js = discovery.dsh_bin(self.settings.dsh_bin)
@@ -321,7 +243,7 @@ class Service:
             "--port",
             str(port),
         ]
-        log = paths.log_path().open("ab", buffering=0)
+        log = self.paths.log.open("ab", buffering=0)
         try:
             # 先落标记行，保证之后的 token URL 一定属于本次进程。
             log.write(f"\n{START_MARKER} port={port} at={datetime.now():%Y-%m-%d %H:%M:%S}\n".encode())
@@ -357,7 +279,7 @@ class Service:
             state.url = self._wait_ready(state)
         except RuntimeError:
             self._kill_tree(state.pid)
-            paths.state_path().unlink(missing_ok=True)
+            self.paths.state.unlink(missing_ok=True)
             raise
         self.write_state(state)
         return state
@@ -372,7 +294,7 @@ class Service:
                     "dsh web 启动后立即退出：\n"
                     + (reason or "（日志里没有可读的失败信息）")
                     + (f"\n{hint}" if hint else "")
-                    + f"\n完整日志：{paths.log_path()}"
+                    + f"\n完整日志：{self.paths.log}"
                 )
             url = self.latest_url()
             if url and (state.port == 0 or self.port_open(state.port)):
@@ -384,7 +306,7 @@ class Service:
         raise RuntimeError(
             f"dsh web 在 {int(self.settings.start_timeout)}s 内未就绪：\n"
             + startup_failure(self._log_text())
-            + f"\n完整日志：{paths.log_path()}"
+            + f"\n完整日志：{self.paths.log}"
         )
 
     def _failure_hint(self, port: int, reason: str) -> str:
@@ -441,7 +363,7 @@ class Service:
                     break
 
         if not targets:
-            paths.state_path().unlink(missing_ok=True)
+            self.paths.state.unlink(missing_ok=True)
             return False
 
         for target in targets:
@@ -453,7 +375,7 @@ class Service:
                 f"{self.settings.host}:{port} 仍被占用：{self.port_owner(port) or '未知'}；"
                 "state.json 已保留，稍后重试 stop"
             )
-        paths.state_path().unlink(missing_ok=True)
+        self.paths.state.unlink(missing_ok=True)
         return True
 
     def ensure(self) -> tuple[State, bool]:
@@ -464,43 +386,29 @@ class Service:
         return self.start(), True
 
     # ── 展示 ──────────────────────────────────────────────────────────
-    def describe(self, *, english: bool = False) -> str:
+    def status(self, *, check_ports: bool = True, check_owner: bool = False) -> ServiceStatus:
+        """一次读取的状态快照；读操作不修改实例状态。"""
         state = self.read_state()
         proc = self.live_process(state)
-        if state is not None and proc is not None:
-            self._port = state.port
-        port = self.effective_port()
         running = proc is not None
-        listening = self.port_open(port)
-        url = self.latest_url() if running else None
-        pid = proc.pid if proc is not None else "-"
-        warning = not running and listening
-        # port_owner() 要枚举整张 TCP 表；只在确实要提示占用者时才查。
-        owner = (self.port_owner(port) or ("unknown" if english else "未知")) if warning else ""
+        port = state.port if state is not None and running else self.settings.port
+        listening = self.port_open(port) if check_ports else False
+        url = None
+        if running and check_ports:
+            url = state.url if state is not None and state.url else self.latest_url()
+        owner = self.port_owner(port) if check_owner and not running and listening else None
+        return ServiceStatus(
+            running=running,
+            pid=proc.pid if proc is not None else None,
+            host=self.settings.host,
+            port=port,
+            listening=listening,
+            url=url,
+            work_dir=self.settings.work_dir,
+            data_dir=self.paths.data,
+            log_path=self.paths.log,
+            owner=owner,
+        )
 
-        if english:
-            lines = [
-                f"Service : {'running' if running else 'stopped'}",
-                f"PID     : {pid}",
-                f"Port    : {self.settings.host}:{port} ({'LISTENING' if listening else 'closed'})",
-                f"URL     : {url or '-'}",
-                f"Workdir : {self.settings.work_dir}",
-                f"Data    : {paths.data_dir()}",
-                f"Log     : {paths.log_path()}",
-            ]
-            if warning:
-                lines.append(f"Warning : port held by -> {owner}")
-            return "\n".join(lines)
-
-        lines = [
-            f"服务: {'运行中' if running else '未运行'}",
-            f"PID : {pid}",
-            f"端口: {self.settings.host}:{port} ({'LISTENING' if listening else 'closed'})",
-            f"URL : {url or '-'}",
-            f"工作目录: {self.settings.work_dir}",
-            f"数据目录: {paths.data_dir()}",
-            f"日志: {paths.log_path()}",
-        ]
-        if warning:
-            lines.append(f"注意: 端口被外部进程占用 -> {owner}")
-        return "\n".join(lines)
+    def describe(self, *, english: bool = False) -> str:
+        return self.status(check_owner=True).full(english=english)

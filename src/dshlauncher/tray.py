@@ -29,7 +29,9 @@ from typing import Any
 
 import psutil
 
-from . import actions, paths, platform, service
+from . import actions, paths, service
+from .context import Context
+from .paths import Paths
 from .settings import Settings
 
 TITLE = "DeepSeek Harness"
@@ -48,19 +50,13 @@ class TrayUnavailable(RuntimeError):
 
 # ── 状态文本 ──────────────────────────────────────────────────────────
 def status_text(controller: service.Service) -> str:
-    state = controller.read_state()
-    proc = controller.live_process(state)
-    if state is None or proc is None:
-        return "未运行"
-    return f"运行中 · pid={proc.pid} · {controller.settings.host}:{state.port}"
+    """tooltip 用的完整短状态；不探测端口。"""
+    return controller.status(check_ports=False).tooltip()
 
 
 def state_text(controller: service.Service) -> str:
-    """菜单里的短状态；完整信息点开后由 ``describe`` 提供。"""
-    state = controller.read_state()
-    if state is None or controller.live_process(state) is None:
-        return "未运行"
-    return "运行中"
+    """菜单里的短状态；详情由「服务状态」弹窗提供。"""
+    return controller.status(check_ports=False).short()
 
 
 # ── 图标 ──────────────────────────────────────────────────────────────
@@ -132,9 +128,10 @@ def _fresh(path: Path, seconds: float = 5.0) -> bool:
         return False
 
 
-def acquire_lock() -> Lock | None:
+def acquire_lock(paths_: Paths) -> Lock | None:
     """抢到返回 Lock；已有活着的托盘（或正在写锁）返回 None。"""
-    path = paths.ensure_data_dir() / LOCK_NAME
+    paths_.ensure()
+    path = paths_.tray_lock
     for _ in range(5):
         try:
             fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0))
@@ -164,8 +161,8 @@ def release_lock(lock: Lock) -> None:
 
 
 # ── 托盘信息 / IPC ────────────────────────────────────────────────────
-def _read_info() -> dict[str, Any] | None:
-    data = _read_json(paths.data_dir() / INFO_NAME)
+def _read_info(paths_: Paths) -> dict[str, Any] | None:
+    data = _read_json(paths_.tray_info)
     if data is None:
         return None
     try:
@@ -178,9 +175,9 @@ def _read_info() -> dict[str, Any] | None:
     return data
 
 
-def running() -> tuple[int, int] | None:
+def running(paths_: Paths) -> tuple[int, int] | None:
     """正在运行的托盘 ``(pid, IPC 端口)``；没有或信息已过期返回 ``None``。"""
-    info = _read_info()
+    info = _read_info(paths_)
     if info is None:
         return None
     try:
@@ -192,13 +189,13 @@ def running() -> tuple[int, int] | None:
         return None
 
 
-def _write_info(data: dict[str, Any]) -> None:
-    paths.write_atomic(paths.ensure_data_dir() / INFO_NAME, json.dumps(data))
+def _write_info(paths_: Paths, data: dict[str, Any]) -> None:
+    paths.write_atomic(paths_.tray_info, json.dumps(data))
 
 
-def _clear_info() -> None:
+def _clear_info(paths_: Paths) -> None:
     with contextlib.suppress(OSError):
-        (paths.data_dir() / INFO_NAME).unlink(missing_ok=True)
+        paths_.tray_info.unlink(missing_ok=True)
 
 
 def _request(info: dict[str, Any], command: str, timeout: float) -> str:
@@ -214,11 +211,11 @@ def _request(info: dict[str, Any], command: str, timeout: float) -> str:
     return str(reply.get("result") or "")
 
 
-def send_open(timeout: float, *, wait: float = 0.0) -> str:
+def send_open(paths_: Paths, timeout: float, *, wait: float = 0.0) -> str:
     """让托盘打开窗口；``wait`` 内反复重试等待托盘就绪。"""
     deadline = time.monotonic() + wait
     while True:
-        info = _read_info()
+        info = _read_info(paths_)
         if info is not None and _alive(int(info["pid"]), float(info["create_time"])):
             try:
                 return _request(info, "open", timeout)
@@ -282,9 +279,11 @@ class IpcServer:
 
 # ── 托盘本体 ──────────────────────────────────────────────────────────
 class TrayApp:
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
-        self.controller = service.Service(settings)
+    def __init__(self, settings: Settings, *, context: Context | None = None) -> None:
+        self.context = context or Context.create(settings)
+        self.settings = self.context.settings
+        self.paths = self.context.paths
+        self.controller = self.context.service()
         self.icon: Any = None
         self.server: IpcServer | None = None
         self._busy = threading.Lock()
@@ -300,18 +299,19 @@ class TrayApp:
         self.server = IpcServer(self._ipc, token)
         self.server.start()
         _write_info(
+            self.paths,
             {
                 "pid": os.getpid(),
                 "create_time": psutil.Process().create_time(),
                 "port": self.server.port,
                 "token": token,
-            }
+            },
         )
         _print("托盘已启动：左键打开窗口，右键打开菜单。")
         try:
             self.icon.run(setup=self._setup)
         except KeyboardInterrupt:
-            paths.audit("tray: Ctrl+C，停止服务后退出")
+            self.paths.audit("tray: Ctrl+C，停止服务后退出")
             with contextlib.suppress(Exception), self._busy:
                 self.controller.stop()
         finally:
@@ -324,13 +324,13 @@ class TrayApp:
         return pystray.Menu(
             menu_item(
                 "打开窗口",
-                self._action("打开窗口", lambda: actions.open_dsh(self.settings), quiet=True),
+                self._action("打开窗口", lambda: actions.open_dsh(self.context), quiet=True),
                 default=True,
             ),
             menu_item(lambda item: f"服务状态：{state_text(self.controller)}…", self._details),
             pystray.Menu.SEPARATOR,
             menu_item("停止服务", self._action("停止服务", self._stop_service)),
-            menu_item("重启服务", self._action("重启服务", lambda: actions.restart(self.settings))),
+            menu_item("重启服务", self._action("重启服务", lambda: actions.restart(self.context))),
             menu_item("刷新状态", lambda icon, item: self._refresh()),
             pystray.Menu.SEPARATOR,
             menu_item("查看日志", self._action("查看日志", self._open_log)),
@@ -366,10 +366,10 @@ class TrayApp:
     def _work(self, label: str, work: Callable[[], Any]) -> None:
         try:
             result = work()
-            paths.audit(f"tray {label}: {result or 'ok'}")
+            self.paths.audit(f"tray {label}: {result or 'ok'}")
         except Exception as exc:  # noqa: BLE001 - 托盘统一转成气泡 + 审计
             text = f"{label}失败：{type(exc).__name__}: {exc}"
-            paths.audit(text, detail=traceback.format_exc())
+            self.paths.audit(text, detail=traceback.format_exc())
             self._notify(text)
         finally:
             self._busy.release()
@@ -381,11 +381,11 @@ class TrayApp:
         threading.Thread(target=self._title_loop, daemon=True).start()
         with self._busy:
             try:
-                result = actions.open_dsh(self.settings)
-                paths.audit("tray open: " + result)
+                result = actions.open_dsh(self.context)
+                self.paths.audit("tray open: " + result)
             except Exception as exc:  # noqa: BLE001 - 托盘启动失败也要留在任务栏
                 text = f"打开窗口失败：{type(exc).__name__}: {exc}"
-                paths.audit(text, detail=traceback.format_exc())
+                self.paths.audit(text, detail=traceback.format_exc())
                 self._notify(text)
         self._refresh()
 
@@ -393,14 +393,14 @@ class TrayApp:
         return "已停止服务" if self.controller.stop() else "服务未在运行"
 
     def _open_log(self) -> str:
-        paths.ensure_data_dir()
-        paths.log_path().touch(exist_ok=True)
-        platform.load().open_path(paths.log_path())
-        return f"已打开 {paths.log_path()}"
+        self.paths.ensure()
+        self.paths.log.touch(exist_ok=True)
+        self.context.backend.open_path(self.paths.log)
+        return f"已打开 {self.paths.log}"
 
     def _open_data_dir(self) -> str:
-        platform.load().open_path(paths.ensure_data_dir())
-        return f"已打开 {paths.data_dir()}"
+        self.context.backend.open_path(self.paths.ensure())
+        return f"已打开 {self.paths.data}"
 
     def _details(self, icon: Any = None, item: Any = None) -> None:
         """菜单只显示短状态；详情放进原生弹窗，避免菜单过宽。"""
@@ -413,12 +413,12 @@ class TrayApp:
             text = self.controller.describe()
         except Exception as exc:  # noqa: BLE001 - 弹窗仍然要显示失败原因
             text = f"读取状态失败：{type(exc).__name__}: {exc}"
-            paths.audit(text, detail=traceback.format_exc())
+            self.paths.audit(text, detail=traceback.format_exc())
         try:
-            paths.audit("tray 服务状态: " + (text.splitlines() or [""])[0])
-            platform.load().message(f"{TITLE} 服务状态", text)
+            self.paths.audit("tray 服务状态: " + (text.splitlines() or [""])[0])
+            self.context.backend.message(f"{TITLE} 服务状态", text)
         except Exception as exc:  # noqa: BLE001 - 弹窗失败也要留痕
-            paths.audit(f"tray 服务状态失败: {type(exc).__name__}: {exc}", detail=traceback.format_exc())
+            self.paths.audit(f"tray 服务状态失败: {type(exc).__name__}: {exc}", detail=traceback.format_exc())
             self._notify(f"打开状态窗口失败：{exc}")
         finally:
             self._details_lock.release()
@@ -429,8 +429,8 @@ class TrayApp:
         if self._stopping.is_set():
             raise RuntimeError("托盘正在退出")
         with self._busy:
-            result = actions.open_dsh(self.settings)
-        paths.audit("tray ipc open: " + result)
+            result = actions.open_dsh(self.context)
+        self.paths.audit("tray ipc open: " + result)
         self._refresh()
         return result
 
@@ -444,9 +444,11 @@ class TrayApp:
         try:
             with self._busy:
                 stopped = self.controller.stop()
-            paths.audit("tray quit: " + ("服务已停止" if stopped else "服务未在运行"))
+            self.paths.audit("tray quit: " + ("服务已停止" if stopped else "服务未在运行"))
         except Exception as exc:  # noqa: BLE001 - 停服务失败也要退出托盘
-            paths.audit(f"tray quit: 停止服务失败 {type(exc).__name__}: {exc}", detail=traceback.format_exc())
+            self.paths.audit(
+                f"tray quit: 停止服务失败 {type(exc).__name__}: {exc}", detail=traceback.format_exc()
+            )
             self._notify(f"停止服务失败：{exc}")
         with contextlib.suppress(Exception):
             self.icon.stop()
@@ -478,7 +480,7 @@ class TrayApp:
         self._title_stop.set()
         if self.server is not None:
             self.server.close()
-        _clear_info()
+        _clear_info(self.paths)
 
 
 # ── 入口 ──────────────────────────────────────────────────────────────
@@ -489,47 +491,49 @@ def _print(text: str) -> None:
         print(text)
 
 
-def _open_directly(settings: Settings) -> int:
-    result = actions.open_dsh(settings)
-    paths.audit("open: " + result)
+def _open_directly(context: Context) -> int:
+    result = actions.open_dsh(context)
+    context.paths.audit("open: " + result)
     _print(result)
     return 0
 
 
-def _report_request_error(exc: BaseException) -> int:
+def _report_request_error(exc: BaseException, paths_: Paths) -> int:
     # 托盘已经在气泡里报过错了，这里只落日志（有控制台时顺带打印），不再弹窗。
     text = f"托盘请求失败：{type(exc).__name__}: {exc}"
-    paths.audit(text)
+    paths_.audit(text)
     _print(text)
     return 1
 
 
-def run(settings: Settings) -> int:
+def run(settings: Settings, *, context: Context | None = None) -> int:
     """双击 / ``tray`` 的入口：有托盘就投递，没有就自己成为托盘。"""
-    timeout = settings.start_timeout + 30
+    context = context or Context.create(settings)
+    paths_ = context.paths
+    timeout = context.settings.start_timeout + 30
     try:
-        result = send_open(timeout, wait=0.0)
+        result = send_open(paths_, timeout, wait=0.0)
     except TrayUnavailable:
         pass
     except RuntimeError as exc:
-        return _report_request_error(exc)
+        return _report_request_error(exc, paths_)
     else:
         _print(result)
         return 0
 
-    lock = acquire_lock()
+    lock = acquire_lock(paths_)
     if lock is None:
         # 另一个实例正在启动托盘：等它就绪后把 open 投递过去。
         try:
-            result = send_open(timeout, wait=START_WAIT)
+            result = send_open(paths_, timeout, wait=START_WAIT)
         except TrayUnavailable:
-            return _open_directly(settings)
+            return _open_directly(context)
         except RuntimeError as exc:
-            return _report_request_error(exc)
+            return _report_request_error(exc, paths_)
         _print(result)
         return 0
 
     try:
-        return TrayApp(settings).run()
+        return TrayApp(context.settings, context=context).run()
     finally:
         release_lock(lock)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ import psutil
 import pytest
 
 from dshlauncher import paths, service, tray
+from dshlauncher.context import Context
 from dshlauncher.settings import Settings
 
 
@@ -18,6 +20,15 @@ from dshlauncher.settings import Settings
 def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(paths, "data_dir", lambda: tmp_path)
     return tmp_path
+
+
+@pytest.fixture
+def paths_(data_dir: Path) -> paths.Paths:
+    return paths.Paths(data_dir)
+
+
+def _context(paths_: paths.Paths, backend: object) -> Context:
+    return replace(Context.create(Settings(), paths_=paths_), backend=backend)
 
 
 def test_status_text_when_stopped(data_dir: Path) -> None:
@@ -35,57 +46,58 @@ def test_status_text_when_running(data_dir: Path, monkeypatch: pytest.MonkeyPatc
     assert tray.state_text(controller) == "运行中"
 
 
-def test_lock_is_single_instance(data_dir: Path) -> None:
-    first = tray.acquire_lock()
+def test_lock_is_single_instance(paths_: paths.Paths) -> None:
+    first = tray.acquire_lock(paths_)
     assert first is not None
     try:
-        assert tray.acquire_lock() is None
+        assert tray.acquire_lock(paths_) is None
     finally:
         tray.release_lock(first)
-    second = tray.acquire_lock()
+    second = tray.acquire_lock(paths_)
     assert second is not None
     tray.release_lock(second)
-    assert not (data_dir / tray.LOCK_NAME).exists()
+    assert not paths_.tray_lock.exists()
 
 
-def test_stale_lock_is_replaced(data_dir: Path) -> None:
-    path = data_dir / tray.LOCK_NAME
+def test_stale_lock_is_replaced(paths_: paths.Paths) -> None:
+    path = paths_.tray_lock
     path.write_text(json.dumps({"pid": 999999999, "create_time": 1.0}), "utf-8")
-    lock = tray.acquire_lock()
+    lock = tray.acquire_lock(paths_)
     assert lock is not None
     tray.release_lock(lock)
     assert not path.exists()
 
 
-def test_fresh_unreadable_lock_is_respected(data_dir: Path) -> None:
+def test_fresh_unreadable_lock_is_respected(paths_: paths.Paths) -> None:
     # 另一个实例刚创建锁文件、内容还没写完：不能抢。
-    (data_dir / tray.LOCK_NAME).write_text("", "utf-8")
-    assert tray.acquire_lock() is None
+    paths_.tray_lock.write_text("", "utf-8")
+    assert tray.acquire_lock(paths_) is None
 
 
-def test_send_open_without_tray(data_dir: Path) -> None:
+def test_send_open_without_tray(paths_: paths.Paths) -> None:
     with pytest.raises(tray.TrayUnavailable):
-        tray.send_open(1.0)
+        tray.send_open(paths_, 1.0)
 
 
-def test_ipc_round_trip(data_dir: Path) -> None:
+def test_ipc_round_trip(paths_: paths.Paths) -> None:
     server = tray.IpcServer(lambda command: f"handled {command}", "token")
     server.start()
     tray._write_info(
+        paths_,
         {
             "pid": os.getpid(),
             "create_time": psutil.Process().create_time(),
             "port": server.port,
             "token": "token",
-        }
+        },
     )
     try:
-        assert tray.running() == (os.getpid(), server.port)
-        assert tray.send_open(5.0) == "handled open"
+        assert tray.running(paths_) == (os.getpid(), server.port)
+        assert tray.send_open(paths_, 5.0) == "handled open"
     finally:
         server.close()
-        tray._clear_info()
-    assert tray.running() is None
+        tray._clear_info(paths_)
+    assert tray.running(paths_) is None
 
 
 def test_ipc_rejects_bad_token(data_dir: Path) -> None:
@@ -143,49 +155,45 @@ def test_quit_still_stops_icon_when_service_stop_fails(
     assert events == ["notify", "icon"]
 
 
-def test_show_details_opens_dialog(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    app = tray.TrayApp(Settings())
+def test_show_details_opens_dialog(paths_: paths.Paths, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str]] = []
+    backend = SimpleNamespace(message=lambda title, text, **kwargs: calls.append((title, text)))
+    context = _context(paths_, backend)
+    app = tray.TrayApp(context.settings, context=context)
     monkeypatch.setattr(app.controller, "describe", lambda: "服务: 运行中\nPID : 1")
-    monkeypatch.setattr(
-        tray.platform,
-        "load",
-        lambda: SimpleNamespace(message=lambda title, text, **kwargs: calls.append((title, text))),
-    )
     app._details_lock.acquire()
     app._show_details()
     assert calls == [("DeepSeek Harness 服务状态", "服务: 运行中\nPID : 1")]
     assert app._details_lock.acquire(blocking=False)
 
 
-def test_show_details_reports_describe_failure(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    app = tray.TrayApp(Settings())
+def test_show_details_reports_describe_failure(paths_: paths.Paths, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str]] = []
+    backend = SimpleNamespace(message=lambda title, text, **kwargs: calls.append((title, text)))
+    context = _context(paths_, backend)
+    app = tray.TrayApp(context.settings, context=context)
 
     def boom() -> str:
         raise RuntimeError("no state")
 
     monkeypatch.setattr(app.controller, "describe", boom)
-    monkeypatch.setattr(
-        tray.platform,
-        "load",
-        lambda: SimpleNamespace(message=lambda title, text, **kwargs: calls.append((title, text))),
-    )
     app._details_lock.acquire()
     app._show_details()
     assert calls and calls[0][1].startswith("读取状态失败")
     assert app._details_lock.acquire(blocking=False)
 
 
-def test_show_details_notifies_when_dialog_fails(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    app = tray.TrayApp(Settings())
+def test_show_details_notifies_when_dialog_fails(
+    paths_: paths.Paths, monkeypatch: pytest.MonkeyPatch
+) -> None:
     notified: list[str] = []
 
     def boom(title: str, text: str, **kwargs: object) -> None:
         raise RuntimeError("no dialog")
 
+    context = _context(paths_, SimpleNamespace(message=boom))
+    app = tray.TrayApp(context.settings, context=context)
     monkeypatch.setattr(app.controller, "describe", lambda: "服务: 未运行")
-    monkeypatch.setattr(tray.platform, "load", lambda: SimpleNamespace(message=boom))
     monkeypatch.setattr(app, "_notify", lambda text: notified.append(text))
     app._details_lock.acquire()
     app._show_details()

@@ -11,6 +11,7 @@ import contextlib
 import os
 import sys
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -95,43 +96,89 @@ def write_atomic(path: Path, text: str) -> None:
         raise
 
 
+@dataclass(frozen=True)
+class Paths:
+    """一个数据目录下的全部运行时文件；测试/嵌入可显式注入。"""
+
+    data: Path
+
+    @classmethod
+    def current(cls) -> Paths:
+        return cls(data_dir())
+
+    def ensure(self) -> Path:
+        self.data.mkdir(parents=True, exist_ok=True)
+        return self.data
+
+    @property
+    def state(self) -> Path:
+        return self.data / "state.json"
+
+    @property
+    def log(self) -> Path:
+        return self.data / "dsh-web.log"
+
+    @property
+    def launcher_log(self) -> Path:
+        return self.data / "launcher.log"
+
+    @property
+    def profile(self) -> Path:
+        return self.data / "browser"
+
+    @property
+    def config(self) -> Path:
+        return self.data / "config.toml"
+
+    @property
+    def tray_info(self) -> Path:
+        return self.data / "tray.json"
+
+    @property
+    def tray_lock(self) -> Path:
+        return self.data / "tray.lock"
+
+    def audit(self, text: str, *, detail: str | None = None) -> None:
+        """追加一行启动器审计日志（GUI 启动时唯一可发现的记录）。
+
+        ``detail`` 用于异常摘要：换行会被压成 `` | ``，保留调用点但不刷屏。
+        """
+        try:
+            self.ensure()
+            log = self.launcher_log
+            _rotate_audit(log)
+            line = text.splitlines()[0] if text else ""
+            if detail:
+                rows = [row.strip() for row in detail.splitlines() if row.strip()]
+                line += " | " + " | ".join(rows)[:1000]
+            with log.open("a", encoding="utf-8") as handle:
+                handle.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {line}\n")
+        except OSError:
+            pass
+
+
 def state_path() -> Path:
-    return data_dir() / "state.json"
+    return Paths.current().state
 
 
 def log_path() -> Path:
-    return data_dir() / "dsh-web.log"
+    return Paths.current().log
 
 
 def launcher_log_path() -> Path:
-    return data_dir() / "launcher.log"
+    return Paths.current().launcher_log
 
 
 def profile_dir() -> Path:
-    return data_dir() / "browser"
+    return Paths.current().profile
 
 
 def config_path() -> Path:
-    return data_dir() / "config.toml"
+    return Paths.current().config
 
 
 def audit(text: str, *, detail: str | None = None) -> None:
-    """追加一行启动器审计日志（GUI 启动时唯一可发现的记录）。
-
-    ``detail`` 用于异常摘要：换行会被压成 `` | ``，保留调用点但不刷屏。
-    """
-    try:
-        ensure_data_dir()
-        log = launcher_log_path()
-        _rotate_audit(log)
-        line = text.splitlines()[0] if text else ""
-        if detail:
-            rows = [row.strip() for row in detail.splitlines() if row.strip()]
-            line += " | " + " | ".join(rows)[:1000]
-        with log.open("a", encoding="utf-8") as handle:
-            handle.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {line}\n")
-    except OSError:
-        pass
+    Paths.current().audit(text, detail=detail)
 
 
 def _rotate_audit(path: Path) -> None:
