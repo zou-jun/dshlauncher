@@ -64,8 +64,8 @@ uv run python -m dshlauncher open
 | `tray`（默认 / 双击） | 前台运行系统托盘：确保服务在跑、打开/置前窗口；Ctrl+C 退出并停服务 |
 | `open` | 只确保服务并打开/置前窗口，不启动托盘 |
 | `start` / `stop` / `restart` | 只操作服务；已在跑时 `start` 直接复用，显式换端口会先停掉旧实例；`dsh` 升级后用 `restart` |
-| `status` | 服务 PID、端口、token URL、路径 |
-| `doctor` | 依赖发现结果、平台后端、托盘后端与进程、端口占用者、配置来源 |
+| `status` | 服务 PID、端口、token URL、路径；`--json` 输出结构化状态 |
+| `doctor` | 依赖发现结果、平台后端、托盘后端与进程、端口占用者、配置来源；`--json` 输出键值列表 |
 | `install` / `uninstall` | 创建 / 删除桌面入口 |
 | `version` | 版本号 |
 
@@ -91,7 +91,7 @@ uv run python -m dshlauncher open
 |---|---|
 | `state.json` | 服务 pid / create_time / port / url |
 | `dsh-web.log` | 服务输出，含每次启动的 `[launcher] start` 标记与 token URL |
-| `launcher.log` | 启动器动作审计 |
+| `launcher.log` | 启动器动作审计；超过 1 MB 轮转为 `.1` |
 | `browser/` | 专用浏览器配置（零扩展；cookie 绑定 host:port） |
 | `tray.lock` / `tray.json` | 托盘单实例锁与 loopback IPC 端口/随机 token（正常退出时删除，被强杀后下次启动自动清理） |
 | `config.toml` | 可选配置文件 |
@@ -180,6 +180,9 @@ $env:DSHLAUNCHER_BROWSER = "edge"
 | 桌面入口 | `.lnk`（PowerShell COM） | `.desktop`（应用菜单） | `.desktop`（应用菜单） |
 | 打开日志 | `os.startfile` | `xdg-open` | `xdg-open` |
 
+macOS 上 `install` 不自动创建桌面入口（会明确报不支持，Finder 别名无法携带 `-m dshlauncher` 参数）；
+直接运行 `dshlauncher tray`，或手动为可执行文件创建别名。
+
 Wayland 协议本身不提供跨应用枚举/移动窗口的接口，所以默认让 Chrome 走原生 Wayland（渲染、缩放最好）；
 需要 Windows 一样的置前与尺寸纠正时用 `--ozone x11`（Chrome 走 XWayland）：
 
@@ -194,7 +197,8 @@ dshlauncher open --ozone x11
 ## 目录结构
 
 ```
-src/dshlauncher/          源码包（platform/ 与 install/ 是两个子包）
+src/dshlauncher/          源码包（platform/、install/、tray/ 是子包）
+docs/                     架构说明
 tests/                    纯逻辑单测
 packaging/                PyInstaller 入口、spec、应用图标
 scripts/build.py          打包 + 部署
@@ -206,6 +210,10 @@ app/                      部署目录：dshlauncher.exe + _internal/ + .dshlaun
 
 `src/` 布局 + `uv sync` 的 editable 安装意味着 `python -m dshlauncher` 在任何工作目录都能用，
 源码模式下的数据目录仍然落在项目根（向上查找 `pyproject.toml`，与包所在层级无关）。
+
+## 架构
+
+进程模型、模块分层、状态/日志/IPC/锁与扩展点见 [`docs/architecture.md`](docs/architecture.md)。
 
 ## 开发入口（make）
 
@@ -257,7 +265,7 @@ uv run ruff check .      # lint
 uv run ruff format .     # 格式化
 ```
 
-只覆盖纯逻辑：token URL 的标记过滤、窗口几何钳制、配置优先级、依赖候选解析、托盘单实例与 IPC。
+只覆盖纯逻辑：token URL、窗口几何、配置优先级、依赖发现、托盘单实例/IPC/编排、状态快照、JSON 输出与安装器。
 
 ## 故障排查
 

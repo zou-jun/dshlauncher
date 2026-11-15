@@ -9,6 +9,7 @@ import subprocess
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 WINDOWS = sys.platform == "win32"
@@ -115,6 +116,7 @@ def node_candidates() -> list[Path | str | None]:
     return candidates
 
 
+@lru_cache(maxsize=16)
 def node_exe(configured: Path | None = None) -> Path:
     candidate = _first_file([configured, _env("NODE"), *node_candidates()])
     if candidate is None:
@@ -182,6 +184,7 @@ def _shim_candidates(shim: Path) -> list[Path]:
     return candidates
 
 
+@lru_cache(maxsize=16)
 def dsh_bin(configured: Path | None = None) -> Path:
     """按代价从低到高查找 bin.js：显式配置 → PATH shim → 包管理器查询。
 
@@ -287,6 +290,7 @@ def browser_version(path: Path) -> str | None:
     return None
 
 
+@lru_cache(maxsize=16)
 def browser_exe(configured: str | None = None) -> Browser:
     """按 family 名或显式路径定位 Chromium 系浏览器。"""
     requested = configured or _env("BROWSER")
@@ -314,3 +318,10 @@ def browser_exe(configured: str | None = None) -> Browser:
     raise DiscoveryError(
         "找不到 Chromium 系浏览器（Chrome / Edge / Chromium / Brave）：无扩展的应用窗口只支持这一类浏览器"
     )
+
+
+def reset_cache() -> None:
+    """清空进程级发现缓存（测试或安装完依赖后重新探测）。"""
+    node_exe.cache_clear()
+    dsh_bin.cache_clear()
+    browser_exe.cache_clear()

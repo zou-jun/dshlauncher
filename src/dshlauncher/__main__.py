@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import os
 import sys
 import traceback
@@ -153,7 +154,11 @@ def _cmd_restart(args: argparse.Namespace) -> int:
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
-    _emit(_context(args).service().describe())
+    snapshot = _context(args).service().status(check_owner=True)
+    if getattr(args, "json", False):
+        _emit(json.dumps(snapshot.as_dict(), ensure_ascii=False, indent=2))
+    else:
+        _emit(snapshot.full())
     return 0
 
 
@@ -161,6 +166,10 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     from . import doctor
 
     rows = doctor.report(_context(args))
+    if getattr(args, "json", False):
+        payload = [{"name": label, "value": value} for label, value in rows]
+        _emit(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
     width = max(display_width(label) for label, _ in rows)
     _emit("\n".join(f"{pad(label, width)} : {value}" for label, value in rows))
     return 0
@@ -247,6 +256,8 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         sub = subparsers.add_parser(name, help=help_text)
         _add_common(sub)
+        if name in {"status", "doctor"}:
+            sub.add_argument("--json", action="store_true", help="以 JSON 输出")
         sub.set_defaults(handler=HANDLERS[name])
 
     install_parser = subparsers.add_parser("install", help="创建桌面入口")

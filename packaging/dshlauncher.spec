@@ -14,7 +14,7 @@ ICON_ARG = str(ICON) if ICON.is_file() else None
 PNG = PROJECT / "packaging" / "assets" / "app.png"
 
 # pystray 的 hook 会收集全部后端；排除其它平台用不到的，减少无效依赖与警告。
-EXCLUDES = ["pytest", "_pytest", "PyInstaller"]
+EXCLUDES = ["pytest", "_pytest", "PyInstaller", "tkinter", "_tkinter", "turtle"]
 if sys.platform == "win32":
     EXCLUDES += ["pystray._gtk", "pystray._appindicator", "pystray._xorg", "pystray._darwin"]
 elif sys.platform == "darwin":

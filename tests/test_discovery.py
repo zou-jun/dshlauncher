@@ -10,6 +10,9 @@ from dshlauncher import discovery
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("NODE", "DSH_BIN"):
         monkeypatch.delenv("DSHLAUNCHER_" + name, raising=False)
+    discovery.reset_cache()
+    yield
+    discovery.reset_cache()
 
 
 def _make_dsh(root: Path) -> Path:

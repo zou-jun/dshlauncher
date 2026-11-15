@@ -1,8 +1,7 @@
-"""macOS 桌面入口（尽力而为，未在真机验证）；Linux 用 ``install/linux.py``。"""
+"""macOS / 其它 POSIX 桌面入口：不自动创建，避免写入 macOS 不识别的 .desktop。"""
 
 from __future__ import annotations
 
-import stat
 import sys
 from pathlib import Path
 
@@ -16,45 +15,24 @@ def gui_command() -> list[str]:
     return [str(exe), "-m", "dshlauncher"]
 
 
-def _entry(action: str, icon: Path | None) -> str:
-    command = " ".join([*gui_command(), action])
-    lines = [
-        "[Desktop Entry]",
-        "Type=Application",
-        f"Name={DESKTOP_NAME}",
-        "Comment=托管 dsh web 服务并打开无扩展 UI 窗口",
-        f"Exec={command}",
-        "Terminal=false",
-        "Categories=Development;",
-    ]
-    if icon is not None:
-        lines.append(f"Icon={icon}")
-    return "\n".join(lines) + "\n"
-
-
 def _targets() -> list[Path]:
     home = Path.home()
-    apps = home / ".local" / "share" / "applications"
-    desktop = home / "Desktop"
-    return [apps, desktop]
+    return [home / ".local" / "share" / "applications", home / "Desktop"]
 
 
 def create(icon: Path | None = None) -> list[Path]:
-    written: list[Path] = []
-    for directory in _targets():
-        directory.mkdir(parents=True, exist_ok=True)
-        for action, suffix in (("tray", ""),):
-            path = directory / f"dsh{suffix}.desktop"
-            path.write_text(_entry(action, icon), "utf-8")
-            path.chmod(path.stat().st_mode | stat.S_IXUSR)
-            written.append(path)
-    return written
+    command = " ".join([*gui_command(), "tray"])
+    raise RuntimeError(
+        "macOS / 其它 POSIX 暂不支持自动创建桌面入口；"
+        f"请手动运行 `{command}`，或在 Finder 里为可执行文件创建别名。"
+    )
 
 
 def remove() -> list[Path]:
+    """清理旧版本在 POSIX 上写过的 .desktop 文件。"""
     removed: list[Path] = []
     for directory in _targets():
-        for stem in ("dsh", "dshlauncher"):  # 旧前缀一并清理
+        for stem in ("dsh", "dshlauncher"):
             for suffix in ("", "-ui"):
                 path = directory / f"{stem}{suffix}.desktop"
                 if path.is_file():
