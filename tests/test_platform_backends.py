@@ -38,3 +38,12 @@ def test_workarea_short_list_uses_first_desktop() -> None:
 
 def test_workarea_rejects_empty() -> None:
     assert linux._work_area_values(b"", 0) is None
+
+
+def test_all_backends_implement_protocol() -> None:
+    from dshlauncher.platform import base
+
+    required = [name for name in dir(base.Backend) if not name.startswith("_")]
+    for backend in (windows_mod, linux, posix):
+        missing = [name for name in required if not callable(getattr(backend, name, None))]
+        assert not missing, f"{backend.__name__} 缺少 {missing}"

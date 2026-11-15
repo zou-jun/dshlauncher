@@ -6,6 +6,7 @@ import argparse
 import contextlib
 import os
 import sys
+import traceback
 import unicodedata
 from pathlib import Path
 
@@ -354,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.handler(args)
     except Exception as exc:  # noqa: BLE001 - 统一转成提示 + 退出码
-        _audit(f"{args.command} 失败: {type(exc).__name__}: {exc}")
+        paths.audit(f"{args.command} 失败: {type(exc).__name__}: {exc}", detail=traceback.format_exc())
         _report_error(exc)
         return 1
 

@@ -7,13 +7,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
+import tempfile
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
 DATA_DIR_NAME = ".dshlauncher"
+AUDIT_ROTATE_BYTES = 1024 * 1024
 
 
 def _source_root() -> Path:
@@ -76,6 +79,22 @@ def ensure_data_dir() -> Path:
     return path
 
 
+def write_atomic(path: Path, text: str) -> None:
+    """先写同目录临时文件再 replace：读者永远看不到半个 JSON。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temp)
+        raise
+
+
 def state_path() -> Path:
     return data_dir() / "state.json"
 
@@ -96,12 +115,31 @@ def config_path() -> Path:
     return data_dir() / "config.toml"
 
 
-def audit(text: str) -> None:
-    """追加一行启动器审计日志（GUI 启动时唯一可发现的记录）。"""
+def audit(text: str, *, detail: str | None = None) -> None:
+    """追加一行启动器审计日志（GUI 启动时唯一可发现的记录）。
+
+    ``detail`` 用于异常摘要：换行会被压成 `` | ``，保留调用点但不刷屏。
+    """
     try:
         ensure_data_dir()
-        with launcher_log_path().open("a", encoding="utf-8") as handle:
-            handle.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {text.splitlines()[0]}\n")
+        log = launcher_log_path()
+        _rotate_audit(log)
+        line = text.splitlines()[0] if text else ""
+        if detail:
+            rows = [row.strip() for row in detail.splitlines() if row.strip()]
+            line += " | " + " | ".join(rows)[:1000]
+        with log.open("a", encoding="utf-8") as handle:
+            handle.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {line}\n")
+    except OSError:
+        pass
+
+
+def _rotate_audit(path: Path) -> None:
+    try:
+        if path.exists() and path.stat().st_size > AUDIT_ROTATE_BYTES:
+            rotated = path.with_name(path.name + ".1")
+            rotated.unlink(missing_ok=True)
+            path.replace(rotated)
     except OSError:
         pass
 

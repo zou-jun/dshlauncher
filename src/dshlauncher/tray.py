@@ -21,6 +21,7 @@ import socket
 import sys
 import threading
 import time
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -192,10 +193,7 @@ def running() -> tuple[int, int] | None:
 
 
 def _write_info(data: dict[str, Any]) -> None:
-    path = paths.ensure_data_dir() / INFO_NAME
-    tmp = path.with_name(INFO_NAME + ".tmp")
-    tmp.write_text(json.dumps(data), "utf-8")
-    os.replace(tmp, path)
+    paths.write_atomic(paths.ensure_data_dir() / INFO_NAME, json.dumps(data))
 
 
 def _clear_info() -> None:
@@ -371,7 +369,7 @@ class TrayApp:
             paths.audit(f"tray {label}: {result or 'ok'}")
         except Exception as exc:  # noqa: BLE001 - 托盘统一转成气泡 + 审计
             text = f"{label}失败：{type(exc).__name__}: {exc}"
-            paths.audit(text)
+            paths.audit(text, detail=traceback.format_exc())
             self._notify(text)
         finally:
             self._busy.release()
@@ -387,7 +385,7 @@ class TrayApp:
                 paths.audit("tray open: " + result)
             except Exception as exc:  # noqa: BLE001 - 托盘启动失败也要留在任务栏
                 text = f"打开窗口失败：{type(exc).__name__}: {exc}"
-                paths.audit(text)
+                paths.audit(text, detail=traceback.format_exc())
                 self._notify(text)
         self._refresh()
 
@@ -415,11 +413,12 @@ class TrayApp:
             text = self.controller.describe()
         except Exception as exc:  # noqa: BLE001 - 弹窗仍然要显示失败原因
             text = f"读取状态失败：{type(exc).__name__}: {exc}"
+            paths.audit(text, detail=traceback.format_exc())
         try:
             paths.audit("tray 服务状态: " + (text.splitlines() or [""])[0])
             platform.load().message(f"{TITLE} 服务状态", text)
         except Exception as exc:  # noqa: BLE001 - 弹窗失败也要留痕
-            paths.audit(f"tray 服务状态失败: {type(exc).__name__}: {exc}")
+            paths.audit(f"tray 服务状态失败: {type(exc).__name__}: {exc}", detail=traceback.format_exc())
             self._notify(f"打开状态窗口失败：{exc}")
         finally:
             self._details_lock.release()
@@ -447,7 +446,7 @@ class TrayApp:
                 stopped = self.controller.stop()
             paths.audit("tray quit: " + ("服务已停止" if stopped else "服务未在运行"))
         except Exception as exc:  # noqa: BLE001 - 停服务失败也要退出托盘
-            paths.audit(f"tray quit: 停止服务失败 {type(exc).__name__}: {exc}")
+            paths.audit(f"tray quit: 停止服务失败 {type(exc).__name__}: {exc}", detail=traceback.format_exc())
             self._notify(f"停止服务失败：{exc}")
         with contextlib.suppress(Exception):
             self.icon.stop()

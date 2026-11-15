@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dshlauncher"
-version = "0.2.0"
+version = "0.3.0"
 description = "DeepSeek Harness 启动器：托管 dsh web 服务并在无扩展的 Chromium 窗口里打开 UI"
 readme = "README.md"
 requires-python = ">=3.12"

@@ -144,7 +144,7 @@ class Service:
 
     # ── 状态文件 / 日志 ────────────────────────────────────────────────
     def port_open(self, port: int | None = None, timeout: float = 0.3) -> bool:
-        port = self.effective_port() if port is None else port
+        port = self.settings.port if port is None else port
         try:
             with socket.create_connection((self.settings.host, port), timeout=timeout):
                 return True
@@ -160,7 +160,7 @@ class Service:
 
     def write_state(self, state: State) -> None:
         paths.ensure_data_dir()
-        paths.state_path().write_text(json.dumps(asdict(state), indent=2), "utf-8")
+        paths.write_atomic(paths.state_path(), json.dumps(asdict(state), indent=2))
 
     def _log_text(self) -> str:
         """日志尾部（最多 TAIL_BYTES），覆盖最近一次启动。"""
@@ -222,7 +222,7 @@ class Service:
 
     def port_owner_process(self, port: int | None = None) -> psutil.Process | None:
         """监听该端口的进程（无法获取时返回 None）。"""
-        port = self.effective_port() if port is None else port
+        port = self.settings.port if port is None else port
         try:
             connections = psutil.net_connections(kind="tcp")
         except (psutil.Error, OSError):
@@ -235,9 +235,8 @@ class Service:
                     return None
         return None
 
-    def _wait_port_closed(self, timeout: float = STOP_TIMEOUT) -> None:
+    def _wait_port_closed(self, port: int, timeout: float = STOP_TIMEOUT) -> None:
         """等到端口真正可 bind：connect 被拒不代表旧 socket 已经释放。"""
-        port = self.effective_port()
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if ports.probe(self.settings.host, port).free:
@@ -245,7 +244,7 @@ class Service:
             time.sleep(0.1)
 
     def port_owner(self, port: int | None = None) -> str | None:
-        port = self.effective_port() if port is None else port
+        port = self.settings.port if port is None else port
         try:
             connections = psutil.net_connections(kind="tcp")
         except (psutil.Error, OSError):
@@ -291,7 +290,7 @@ class Service:
             if owner is not None and self._is_dsh_process(owner):
                 paths.audit(f"takeover: 端口 {port} 上的外部 dsh web pid={owner.pid}")
                 self._kill_tree(owner.pid)
-                self._wait_port_closed()
+                self._wait_port_closed(port)
                 verdict = ports.probe(self.settings.host, port)
             if not verdict.free and not self.settings.port_explicit:
                 # 旧实例的监听句柄可能被它的子进程继承，端口迟迟不释放：换候选。
@@ -418,17 +417,28 @@ class Service:
 
     def stop(self) -> bool:
         state = self.read_state()
-        if state is not None:
-            # 停的就是 state 里那个端口，别让自动选端口把目标换掉。
-            self._port = state.port
-        targets: list[psutil.Process] = []
-
         proc = self.live_process(state)
-        if proc is not None:
-            targets.append(proc)
-        elif self.port_open():
-            # 没有可信 state，但端口确实被 dsh web 占着：清理该实例。
-            targets = self.dsh_processes()
+        targets: list[psutil.Process] = []
+        port = self.settings.port
+
+        if proc is not None and state is not None:
+            # state 可信：只停它记录的那个实例和端口。
+            port = state.port
+            targets = [proc]
+        else:
+            # state 不可信：只检查配置端口和上次记录的端口，并且只杀 dsh owner。
+            candidates = [self.settings.port]
+            if state is not None and state.port not in candidates:
+                candidates.append(state.port)
+            planned = self.effective_port()
+            if planned not in candidates:
+                candidates.append(planned)
+            for candidate in candidates:
+                owner = self.port_owner_process(candidate)
+                if owner is not None and self._is_dsh_process(owner):
+                    port = candidate
+                    targets = [owner]
+                    break
 
         if not targets:
             paths.state_path().unlink(missing_ok=True)
@@ -436,8 +446,14 @@ class Service:
 
         for target in targets:
             self._kill_tree(target.pid)
+        self._wait_port_closed(port)
+        if self.port_open(port):
+            raise RuntimeError(
+                f"已终止进程 {', '.join(str(target.pid) for target in targets)}，但 "
+                f"{self.settings.host}:{port} 仍被占用：{self.port_owner(port) or '未知'}；"
+                "state.json 已保留，稍后重试 stop"
+            )
         paths.state_path().unlink(missing_ok=True)
-        self._wait_port_closed()
         return True
 
     def ensure(self) -> tuple[State, bool]:
