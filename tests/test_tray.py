@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -199,3 +200,14 @@ def test_show_details_notifies_when_dialog_fails(
     app._show_details()
     assert notified and "打开状态窗口失败" in notified[0]
     assert app._details_lock.acquire(blocking=False)
+
+
+def test_schedule_refresh_coalesces(paths_: paths.Paths, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = _context(paths_, SimpleNamespace())
+    app = tray.TrayApp(context.settings, context=context)
+    calls: list[bool] = []
+    monkeypatch.setattr(app, "_refresh", lambda: calls.append(True))
+    app._schedule_refresh()
+    app._schedule_refresh()
+    time.sleep(0.3)
+    assert calls == [True]
