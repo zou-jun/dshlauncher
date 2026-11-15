@@ -101,7 +101,13 @@ def build_args(
     return args
 
 
-def launch(settings: Settings, url: str, *, backend: ModuleType | None = None) -> str:
+def launch(
+    settings: Settings,
+    url: str,
+    *,
+    backend: ModuleType | None = None,
+    dedupe: bool | None = None,
+) -> str:
     """打开应用窗口；已有窗口时只置前。返回 ``new`` 或 ``focused``。
 
     原生 Wayland（``ozone=auto`` / ``wayland``）没有可用的窗口控制 API，
@@ -116,7 +122,8 @@ def launch(settings: Settings, url: str, *, backend: ModuleType | None = None) -
     work = backend.work_area()
     target = geometry.preferred_rect(work, **settings.window_kwargs()) if work is not None else None
 
-    if settings.dedupe and window_control:
+    use_dedupe = settings.dedupe if dedupe is None else dedupe
+    if use_dedupe and window_control:
         existing = backend.find_window(_profile_pids(profile, names))
         if existing is not None:
             _settle(existing, target, backend=backend)

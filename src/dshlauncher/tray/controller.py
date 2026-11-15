@@ -28,6 +28,7 @@ class TrayController:
         self.service = context.service()
         self._busy = threading.Lock()
         self._stopping = threading.Event()
+        self._starting = threading.Event()
 
     @property
     def stopping(self) -> bool:
@@ -46,8 +47,18 @@ class TrayController:
         with self._busy:
             return work()
 
+    def status_short(self) -> str:
+        return "启动中…" if self._starting.is_set() else state_text(self.service)
+
+    def status_tooltip(self) -> str:
+        return "正在启动服务…" if self._starting.is_set() else status_text(self.service)
+
     def open_window(self) -> str:
-        return actions.open_dsh(self.context)
+        self._starting.set()
+        try:
+            return actions.open_dsh(self.context)
+        finally:
+            self._starting.clear()
 
     def restart(self) -> str:
         return actions.restart(self.context)

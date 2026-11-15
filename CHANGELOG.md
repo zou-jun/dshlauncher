@@ -3,6 +3,7 @@
 ## 0.3.0
 
 - 双击进入系统托盘：打开 dsh 窗口后常驻，右键菜单承载打开/停止/重启/刷新/日志/数据目录/退出。
+- 服务未就绪时先打开本地启动过场页，就绪后自动跳转；托盘状态/ tooltip 显示「启动中」。
 - 托盘单实例：`tray.lock` + loopback IPC，重复双击只打开/置前窗口。
 - 「服务状态」菜单项点击弹出原生详情框（Windows MessageBoxW、Linux zenity/kdialog、macOS osascript）。
 - 「退出并停止服务」按约定停止 dsh；窗口保留。

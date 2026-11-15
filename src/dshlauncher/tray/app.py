@@ -17,7 +17,7 @@ import psutil
 from .. import actions, paths
 from ..context import Context
 from ..settings import Settings
-from .controller import TrayController, state_text, status_text
+from .controller import TrayController
 from .ipc import START_WAIT, IpcServer, TrayUnavailable, _clear_info, _write_info, send_open
 from .single import acquire_lock, release_lock
 
@@ -102,7 +102,7 @@ class TrayApp:
                 default=True,
             ),
             menu_item(
-                lambda item: f"服务状态：{state_text(self.controller.service)}…",
+                lambda item: f"服务状态：{self.controller.status_short()}…",
                 self._details,
             ),
             pystray.Menu.SEPARATOR,
@@ -224,7 +224,7 @@ class TrayApp:
 
     def _refresh_title(self) -> None:
         with contextlib.suppress(Exception):
-            self.icon.title = f"{TITLE} — {status_text(self.controller.service)}"
+            self.icon.title = f"{TITLE} — {self.controller.status_tooltip()}"
 
     def _refresh(self) -> None:
         self._refresh_title()

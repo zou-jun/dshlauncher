@@ -4,7 +4,7 @@
 
 - **启动器进程**：CLI 或托盘二选一；托盘常驻，CLI 命令短命。
 - **dsh web 服务**：`Service.start()` 以分离进程启动的 `node .../dsh web`，关闭终端/托盘不影响。
-- **浏览器窗口**：独立 `--user-data-dir` 的 Chromium `--app` 窗口，dedupe 时置前。
+- **浏览器窗口**：独立 `--user-data-dir` 的 Chromium `--app` 窗口，dedupe 时置前；服务未就绪时先显示本地过场页。
 
 ```mermaid
 graph TD
@@ -39,6 +39,7 @@ graph TD
 | `service.py` | 服务生命周期 facade：端口规划、启动/停止/就绪、状态快照 |
 | `state.py` / `logs.py` / `status.py` | 状态持久化、日志解析与轮转、展示模型 |
 | `ports.py` / `discovery.py` / `browser.py` | 端口判定、依赖发现、Chromium 窗口 |
+| `splash.py` | 启动过场页：本地 HTTP 轮询状态，ready 后跳转 dsh |
 | `tray/` | `single` 锁、`ipc` 本地请求、`controller` 动作、`app` pystray/菜单 |
 | `platform/` | 分离进程、窗口控制、打开路径、原生消息框；`Backend` 协议 + 契约测试 |
 | `install/` | Windows `.lnk`、Linux `.desktop`；macOS 明确报不支持自动安装 |
@@ -60,7 +61,7 @@ graph TD
 
 1. 双击 / `tray`：`tray.run()` 先读 `tray.json` 投递 `open`；没有托盘时用 `tray.lock` 抢单实例，失败则等 30s 后兜底直接开窗口。
 2. 托盘启动：绑定 loopback 端口、写 `tray.json`、显示图标，`setup` 线程执行 `actions.open_dsh()`。
-3. `open_dsh` → `Service.ensure()`（复用或启动）→ `browser.launch()`（dedupe 置前或新开）。
+3. `open_dsh`：服务已就绪 → 直接 `browser.launch()`（dedupe 置前或新开）；未就绪 → 先开本地过场页 `splash.py`，`Service.ensure()` 就绪后页面自己跳到 dsh。
 4. 退出：`TrayController` 排队等待当前动作，停止 dsh，移除图标；窗口保留。
 5. 崩溃/强杀：锁和信息文件在下次启动按 pid/create_time 自动清理；服务保持分离运行。
 

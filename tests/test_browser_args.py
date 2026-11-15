@@ -76,3 +76,41 @@ def test_launch_falls_back_when_breakaway_denied(monkeypatch: pytest.MonkeyPatch
     assert len(calls) == 2
     assert calls[0]["creationflags"] & 0x01000000
     assert not calls[1]["creationflags"] & 0x01000000
+
+
+def test_launch_can_force_new_window(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[dict[str, object]] = []
+    found: list[set[int]] = []
+
+    class Backend:
+        def detach_kwargs(self, *, breakaway: bool = True) -> dict[str, int]:
+            return {"creationflags": 0}
+
+        def process_names(self, browser: str) -> set[str]:
+            return {"chrome.exe"}
+
+        def supports_window_control(self, ozone: str | None = None) -> bool:
+            return True
+
+        def work_area(self) -> None:
+            return None
+
+        def find_window(self, pids: set[int]) -> int:
+            found.append(pids)
+            return 1
+
+    monkeypatch.setattr(browser.platform, "load", lambda: Backend())
+    monkeypatch.setattr(
+        browser.discovery,
+        "browser_exe",
+        lambda value: discovery.Browser("chrome", Path("chrome.exe")),
+    )
+    monkeypatch.setattr(browser, "_wait_window", lambda *args, **kwargs: None)
+    monkeypatch.setattr(browser, "_profile_pids", lambda *args: set())
+    monkeypatch.setattr(browser.paths, "child_env", lambda: {})
+    monkeypatch.setattr(browser.subprocess, "Popen", lambda *args, **kwargs: calls.append(kwargs))
+
+    settings = Settings(profile_dir=tmp_path / "browser", dedupe=True)
+    assert browser.launch(settings, "http://x", dedupe=False) == "new"
+    assert found == []
+    assert calls
