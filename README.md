@@ -228,7 +228,7 @@ make build      # 打包并部署到 app/
 ```
 
 其余目标见 `make help`：`format`、`test ARGS="-k port"`、`start` / `stop` / `restart` /
-`status` / `doctor` / `tray` / `run`、`deploy`、`clean`、`distclean`。
+`status` / `doctor` / `tray` / `open`、`deploy`、`clean`、`distclean`。
 
 Windows 上用 MSYS2 自带的 make：`pacman -S make`，再把 `C:\msys64\usr\bin` **追加**到用户 `PATH`
 （不要前置——那会让所有终端优先用上 MSYS2 的 `find` / `sort` / `tar`）。同一目录下的 `sh`、`git`、

@@ -14,7 +14,7 @@ CLI  := $(PY) -m dshlauncher
 ARGS ?=
 
 .DEFAULT_GOAL := help
-.PHONY: help env lint format fmt-check test check run start stop restart status doctor tray smoke build deploy clean distclean
+.PHONY: help env lint format fmt-check test check open start stop restart status doctor tray smoke build deploy clean distclean
 
 help:  ## 列出全部目标
 	@$(PY) -c "import pathlib,re;[print(f'  {m[1]:<10}{m[2]}') for m in (re.match(r'^([a-z][a-z-]*):.*?##\s*(.+)', l.rstrip()) for l in pathlib.Path('Makefile').read_text('utf-8').splitlines()) if m]"
@@ -39,7 +39,7 @@ test:  ## 跑单测；可透传：make test ARGS="-k port -q"
 
 check: lint fmt-check test  ## 提交前一条命令
 
-run:  ## 确保服务在跑并打开窗口（不常驻托盘）
+open:  ## 确保服务在跑并打开窗口（不常驻托盘）
 	@$(CLI) open
 
 start:  ## 只启动服务
@@ -66,13 +66,13 @@ smoke:  ## 真机冒烟：start → status → stop
 	@$(CLI) stop
 
 build:  ## PyInstaller 打包并部署到 app/
-	@$(PY) scripts/build.py $(ARGS)
+	@$(PY) scripts/build.py
 
 deploy:  ## 只重新部署（用上次的 .build 产物）
 	@$(PY) scripts/build.py --skip-build
 
 clean:  ## 删除 .build / .cache / __pycache__
-	@$(PY) -c "import pathlib,shutil;[shutil.rmtree(p, ignore_errors=True) for p in ('.build','.cache','.pytest_cache','.ruff_cache')];[shutil.rmtree(p, ignore_errors=True) for root in ('src','tests') for p in pathlib.Path(root).rglob('__pycache__')]"
+	@$(PY) -c "import pathlib,shutil;[shutil.rmtree(p, ignore_errors=True) for p in ('.build','.cache')];[shutil.rmtree(p, ignore_errors=True) for root in ('src','tests','scripts','packaging') for p in pathlib.Path(root).rglob('__pycache__')]"
 
 distclean: clean  ## clean + 清空 app/（保留 app/.dshlauncher 数据）
 	@$(PY) -c "import pathlib,shutil;app=pathlib.Path('app');[shutil.rmtree(p) if p.is_dir() else p.unlink() for p in (app.iterdir() if app.is_dir() else []) if p.name != '.dshlauncher']"
