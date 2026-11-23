@@ -221,3 +221,53 @@ def test_controller_reports_starting(paths_: paths.Paths) -> None:
     assert controller.status_tooltip() == "正在启动服务…"
     controller._starting.clear()
     assert controller.status_short() == "未运行"
+
+
+def test_show_panel_reuses_server_and_releases_lock(
+    paths_: paths.Paths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dshlauncher.tray import app as tray_app
+
+    app = tray.TrayApp(Settings(), context=_context(paths_, SimpleNamespace()))
+    created: list[object] = []
+
+    class FakePanel:
+        url = "http://127.0.0.1:1/token/"
+
+        def __init__(self, context: object, *, exclusive: object = None) -> None:
+            created.append(self)
+
+        def start(self) -> None:
+            pass
+
+        def open_window(self) -> str:
+            return "new"
+
+    monkeypatch.setattr(tray_app.updates_panel, "PanelServer", FakePanel)
+    app._panel_lock.acquire()
+    app._show_panel()
+    assert len(created) == 1
+    assert app.panel is created[0]
+    assert app._panel_lock.acquire(blocking=False)
+    app._panel_lock.release()
+
+
+def test_exclusive_rejects_busy_controller(paths_: paths.Paths) -> None:
+    from dshlauncher.upgrade import BusyError
+
+    app = tray.TrayApp(Settings(), context=_context(paths_, SimpleNamespace()))
+    app.controller._busy.acquire()
+    try:
+        with pytest.raises(BusyError):
+            app._exclusive(lambda: None)
+    finally:
+        app.controller._busy.release()
+
+
+def test_exclusive_releases_controller_after_work(paths_: paths.Paths) -> None:
+    app = tray.TrayApp(Settings(), context=_context(paths_, SimpleNamespace()))
+    calls: list[str] = []
+    app._exclusive(lambda: calls.append("work"))
+    assert calls == ["work"]
+    assert app.controller._busy.acquire(blocking=False)
+    app.controller._busy.release()

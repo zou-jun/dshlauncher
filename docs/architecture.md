@@ -27,6 +27,13 @@ graph TD
   Tray --> Ctrl[tray.controller 动作 / 忙碌 / 退出]
   Ctrl --> Svc
   CLI --> Doctor[doctor.py 诊断报表]
+  CLI --> Upd[updates.py 版本检查]
+  Tray --> Panel[updates_panel.py 本地面板]
+  Panel --> Upg[upgrade.py 升级编排]
+  Upd --> Disc
+  Upd --> Browser
+  Upg --> Svc
+  Upg --> Disc
 ```
 
 ## 模块职责
@@ -40,6 +47,9 @@ graph TD
 | `state.py` / `logs.py` / `status.py` | 状态持久化、日志解析与轮转、展示模型 |
 | `ports.py` / `discovery.py` / `browser.py` | 端口判定、依赖发现、Chromium 窗口 |
 | `splash.py` | 启动过场页：本地 HTTP 轮询状态，ready 后跳转 dsh |
+| `updates.py` | dsh / profile 版本发现、semver 比较、`npm outdated` 解析、报告模型 |
+| `upgrade.py` | 升级任务：停服、全局安装、`dsh plugin add`、重启、日志与状态 |
+| `updates_panel.py` | loopback 更新面板：token 校验、检查/升级 JSON API、内联 HTML/JS |
 | `tray/` | `single` 锁、`ipc` 本地请求、`controller` 动作、`app` pystray/菜单 |
 | `platform/` | 分离进程、窗口控制、打开路径、原生消息框；`Backend` 协议 + 契约测试 |
 | `install/` | Windows `.lnk`、Linux `.desktop`；macOS 明确报不支持自动安装 |
@@ -52,7 +62,9 @@ graph TD
 | `state.json` | 服务 pid / create_time / port / url；临时文件 + `os.replace` 原子写 |
 | `dsh-web.log` | 服务 stdout；含每次启动的 `[launcher] start` 标记与 token URL |
 | `launcher.log` | 启动器动作审计；超过 1 MB 轮转为 `.1`，异常附调用点摘要 |
+| `upgrades.log` | 升级任务完整日志；内存面板只保留尾部 600 行，文件超过 1 MB 轮转 |
 | `browser/` | 专用 Chromium profile；cookie 绑 `host:port` |
+| `panel-browser/` | 更新面板的独立 Chromium profile |
 | `tray.lock` | 托盘单实例锁（pid + create_time） |
 | `tray.json` | 托盘 loopback IPC 端口与随机 token；正常退出删除 |
 | `config.toml` | 可选配置 |
@@ -63,7 +75,8 @@ graph TD
 2. 托盘启动：绑定 loopback 端口、写 `tray.json`、显示图标，`setup` 线程执行 `actions.open_dsh()`。
 3. `open_dsh`：服务已就绪 → 直接 `browser.launch()`（dedupe 置前或新开）；未就绪 → 先开本地过场页 `splash.py`，`Service.ensure()` 就绪后页面自己跳到 dsh。
 4. 退出：`TrayController` 排队等待当前动作，停止 dsh，移除图标；窗口保留。
-5. 崩溃/强杀：锁和信息文件在下次启动按 pid/create_time 自动清理；服务保持分离运行。
+5. 更新面板：托盘菜单启动 loopback `PanelServer` 并打开独立窗口；升级任务占用托盘忙碌锁，先停服务、按 dsh → 插件顺序执行、最后重启；面板与服务器随托盘退出关闭。
+6. 崩溃/强杀：锁和信息文件在下次启动按 pid/create_time 自动清理；服务保持分离运行。
 
 ## 并发约定
 

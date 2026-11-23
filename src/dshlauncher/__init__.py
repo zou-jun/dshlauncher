@@ -4,4 +4,4 @@
 `dshlauncher.discovery`，路径集中在 `dshlauncher.paths`。
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

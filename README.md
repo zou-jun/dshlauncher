@@ -7,6 +7,7 @@
 - 服务启动慢时先打开本地过场页，就绪后自动跳转；托盘状态显示「启动中」
 - 窗口用 `--user-data-dir` + `--app`：没有地址栏，也不会带上你日常浏览器的那堆扩展
 - `start / stop / restart / status` 齐全，`doctor` 打印解析到的依赖、数据目录和端口占用
+- `updates` 检查 dsh 与已安装插件更新；托盘「检查更新…」打开可点击升级的本地面板
 - Windows 完整支持；Linux 完整支持（X11 / XWayland，见「平台差异」）；macOS 尽力而为
 
 ## 安装
@@ -67,10 +68,12 @@ uv run python -m dshlauncher open
 | `start` / `stop` / `restart` | 只操作服务；已在跑时 `start` 直接复用，显式换端口会先停掉旧实例；`dsh` 升级后用 `restart` |
 | `status` | 服务 PID、端口、token URL、路径；`--json` 输出结构化状态 |
 | `doctor` | 依赖发现结果、平台后端、托盘后端与进程、端口占用者、配置来源；`--json` 输出键值列表 |
+| `updates` | 检查 dsh 与 `web` profile 插件的更新；`--json` 输出结构化结果；`--panel` 打开可升级的本地面板 |
 | `install` / `uninstall` | 创建 / 删除桌面入口 |
 | `version` | 版本号 |
 
 通用参数：`--host --port --cwd --node --dsh-bin --browser --ozone --profile-dir --no-dedupe --start-timeout`。
+`updates` 额外接受 `--json` / `--panel` / `--profile` / `--timeout`。
 
 ### 托盘菜单
 
@@ -78,10 +81,44 @@ uv run python -m dshlauncher open
 |---|---|
 | 打开窗口 | 确保服务在跑并打开/置前窗口；左键单击图标等价于此 |
 | 服务状态：运行中/未运行… | 点击弹窗显示 PID、端口、URL、工作目录、数据目录与日志路径 |
+| 检查更新… | 打开本地更新面板：列出 dsh / 插件可更新版本，可逐项或全部升级 |
 | 停止服务 / 重启服务 | 直接操作 dsh 服务 |
 | 刷新状态 | 重新读取状态并刷新菜单（外部 `start` / `stop` 后手动点一下） |
 | 查看日志 / 打开数据目录 | 打开 `dsh-web.log` / 数据目录 |
 | 退出并停止服务 | 先停 dsh，再移除托盘图标；已打开的窗口保留 |
+
+## 检查与升级更新
+
+```bash
+dshlauncher updates                 # 文本报告；有更新退出码 1
+dshlauncher updates --json          # 脚本消费
+dshlauncher updates --panel         # 打开面板，终端 Ctrl+C 结束
+dshlauncher updates --profile dsh-tui --timeout 60
+```
+
+- **检查对象**：`dsh` 的全局安装（从 `dsh_bin` 所在包读版本），以及
+  `$DSH_HOME/profiles/<profile>`（默认 `~/.dsh/profiles/web`）`package.json` 里的直接依赖。
+- **数据来源**：`npm view` / `npm outdated`，缺失时回退 `pnpm` 与
+  `dsh plugin --profile <name> outdated`；代理、私有 registry、认证都沿用现有配置。
+  启动器不保存 registry 凭据。
+- **升级顺序**：先 dsh，再插件。开始前停止 dsh 服务（如果正在运行），结束后自动重启；
+  升级 dsh 使用识别到的全局包管理器（npm / pnpm），插件通过
+  `dsh plugin --profile <name> add <包>@<版本> --save-exact`，沿用 dsh 的兼容性预检。
+- **前置条件**：文本检查需要 npm 或 pnpm；dsh 升级还需要能识别 dsh 所属的全局包管理器。
+  用 `--dsh-bin` / `DSHLAUNCHER_DSH_BIN` 显式指定 dsh 路径时，不自动升级 dsh，面板会提示手动处理。
+- **面板**：只监听 `127.0.0.1` 的随机端口，URL 带随机 token；POST 升级还要校验 token 与 Host。
+  面板使用独立的 `panel-browser/` Chromium 配置，不会劫持 dsh 应用窗口。
+  托盘里的面板随托盘进程存活；`updates --panel` 的面板随该终端进程存活。
+- **非 registry 依赖**：`file:` / `link:` / `git+` / GitHub 简写 / tarball / `npm:` 别名不猜测更新，
+  在面板里标记为跳过。
+- **无法比较或安装失败**：报告会保留具体版本和命令输出；dsh 升级失败会跳过后续插件，
+  单个插件失败不阻断其它插件，服务仍会尝试恢复运行。
+- **升级日志**：完整命令输出追加到 `.dshlauncher/upgrades.log`（超过 1 MB 轮转 `.1`）；
+  面板实时日志只保留最后 600 行，避免大量 peer 警告把结尾挤掉。
+- **升级后的 dsh 窗口**：服务重启会换 token，旧应用窗口可能显示 401；关掉窗口后从托盘
+  「打开窗口」重新打开即可。更新面板使用独立配置，不受影响。
+
+退出码：`0` 无更新；`1` 有更新；`2` 检查失败（至少一项完全无法检查）。
 
 ## 数据与配置
 
@@ -93,7 +130,9 @@ uv run python -m dshlauncher open
 | `state.json` | 服务 pid / create_time / port / url |
 | `dsh-web.log` | 服务输出，含每次启动的 `[launcher] start` 标记与 token URL |
 | `launcher.log` | 启动器动作审计；超过 1 MB 轮转为 `.1` |
+| `upgrades.log` | 升级任务完整日志（面板内存只保留最后 600 行）；超过 1 MB 轮转为 `.1` |
 | `browser/` | 专用浏览器配置（零扩展；cookie 绑定 host:port） |
+| `panel-browser/` | 更新面板的独立浏览器配置，避免和 dsh 应用窗口共用实例 |
 | `tray.lock` / `tray.json` | 托盘单实例锁与 loopback IPC 端口/随机 token（正常退出时删除，被强杀后下次启动自动清理） |
 | `config.toml` | 可选配置文件 |
 

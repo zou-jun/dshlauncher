@@ -14,7 +14,7 @@ CLI  := $(PY) -m dshlauncher
 ARGS ?=
 
 .DEFAULT_GOAL := help
-.PHONY: help env lint format fmt-check test check open start stop restart status doctor tray smoke build deploy clean distclean
+.PHONY: help env lint format fmt-check test check open start stop restart status doctor updates tray smoke build deploy clean distclean
 
 help:  ## 列出全部目标
 	@$(PY) -c "import pathlib,re;[print(f'  {m[1]:<10}{m[2]}') for m in (re.match(r'^([a-z][a-z-]*):.*?##\s*(.+)', l.rstrip()) for l in pathlib.Path('Makefile').read_text('utf-8').splitlines()) if m]"
@@ -56,6 +56,9 @@ status:  ## 查看服务 PID / 端口 / token URL
 
 doctor:  ## 依赖发现与端口自检
 	@$(CLI) doctor
+
+updates:  ## 检查 dsh / 插件更新；ARGS="--json" 或 ARGS="--panel"
+	@$(CLI) updates $(ARGS)
 
 tray:  ## 前台运行系统托盘（双击 exe 的等价形态，Ctrl+C 退出）
 	@$(CLI) tray

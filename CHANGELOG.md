@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- 新增 `updates`：检查 dsh 全局安装与 `web` profile 插件的更新，支持 `--json` 与退出码。
+- 新增本地更新面板：托盘「检查更新…」或 `updates --panel` 打开，可逐项/全部升级。
+- 升级流程自动停服与重启：先 dsh，再插件；使用 npm/pnpm 与 `dsh plugin add --save-exact`。
+- 面板使用独立 `panel-browser/` Chromium 配置，loopback + 随机 token + Host 校验。
+- 更新检查复用 npm/pnpm registry 配置，不另存凭据；非 registry 依赖标记为跳过。
+
 ## 0.3.0
 
 - 双击进入系统托盘：打开 dsh 窗口后常驻，右键菜单承载打开/停止/重启/刷新/日志/数据目录/退出。

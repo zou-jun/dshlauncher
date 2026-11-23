@@ -20,6 +20,9 @@ from .settings import Settings
 from .state import State
 from .status import ServiceStatus
 
+#: 启动器托管的 dsh web 使用的 profile；更新检查与插件升级也针对它。
+WEB_PROFILE = "web"
+
 BIN_JS_MARKER = "@deepseek-ai/dsh/lib/bin.js"
 #: 外部手动启动的 dsh 可能是 PATH 上的 shim（符号链接/脚本），不一定带 bin.js 路径。
 DSH_NAMES = {"dsh", "dsh.cmd", "dsh.exe", "dsh.js"}
@@ -236,7 +239,7 @@ class Service:
         args = [
             str(node),
             str(bin_js),
-            "web",
+            WEB_PROFILE,
             "--no-open",
             "--host",
             self.settings.host,

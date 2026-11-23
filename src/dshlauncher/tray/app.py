@@ -14,9 +14,10 @@ from typing import Any
 
 import psutil
 
-from .. import actions, paths
+from .. import actions, paths, updates_panel
 from ..context import Context
 from ..settings import Settings
+from ..upgrade import BusyError
 from .controller import TrayController
 from .ipc import START_WAIT, IpcServer, TrayUnavailable, _clear_info, _write_info, send_open
 from .single import acquire_lock, release_lock
@@ -60,7 +61,9 @@ class TrayApp:
         self.controller = TrayController(self.context)
         self.icon: Any = None
         self.server: IpcServer | None = None
+        self.panel: updates_panel.PanelServer | None = None
         self._details_lock = threading.Lock()
+        self._panel_lock = threading.Lock()
         self._title_stop = threading.Event()
         self._refresh_lock = threading.Lock()
         self._refresh_timer: threading.Timer | None = None
@@ -105,6 +108,7 @@ class TrayApp:
                 lambda item: f"服务状态：{self.controller.status_short()}…",
                 self._details,
             ),
+            menu_item("检查更新…", self._open_panel),
             pystray.Menu.SEPARATOR,
             menu_item("停止服务", self._action("停止服务", self._stop_service)),
             menu_item("重启服务", self._action("重启服务", self.controller.restart)),
@@ -163,6 +167,37 @@ class TrayApp:
 
     def _stop_service(self) -> str:
         return "已停止服务" if self.controller.stop() else "服务未在运行"
+
+    def _exclusive(self, work: Callable[[], None]) -> None:
+        """升级期间占住托盘的服务动作锁，避免与停止/重启交叉。"""
+        if not self.controller.try_begin():
+            raise BusyError(BUSY_TEXT)
+        try:
+            work()
+        finally:
+            self.controller.end()
+
+    def _open_panel(self, icon: Any = None, item: Any = None) -> None:
+        if self.controller.stopping:
+            return
+        if not self._panel_lock.acquire(blocking=False):
+            self._notify("更新面板正在打开")
+            return
+        threading.Thread(target=self._show_panel, name="dsh-tray-panel", daemon=True).start()
+
+    def _show_panel(self) -> None:
+        try:
+            if self.panel is None:
+                self.panel = updates_panel.PanelServer(self.context, exclusive=self._exclusive)
+                self.panel.start()
+            result = self.panel.open_window()
+            self.paths.audit(f"tray 更新面板: {result} {self.panel.url}")
+        except Exception as exc:  # noqa: BLE001 - 托盘动作统一转成气泡 + 审计
+            text = f"打开更新面板失败：{type(exc).__name__}: {exc}"
+            self.paths.audit(text, detail=traceback.format_exc())
+            self._notify(text)
+        finally:
+            self._panel_lock.release()
 
     def _details(self, icon: Any = None, item: Any = None) -> None:
         """菜单只显示短状态；详情放进原生弹窗，避免菜单过宽。"""
@@ -256,6 +291,8 @@ class TrayApp:
                 self._refresh_timer.cancel()
         if self.server is not None:
             self.server.close()
+        if self.panel is not None:
+            self.panel.close()
         _clear_info(self.paths)
 
 

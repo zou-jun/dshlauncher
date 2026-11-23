@@ -123,8 +123,18 @@ class Paths:
         return self.data / "launcher.log"
 
     @property
+    def upgrades_log(self) -> Path:
+        """升级任务完整日志；面板内存里只保留尾部。"""
+        return self.data / "upgrades.log"
+
+    @property
     def profile(self) -> Path:
         return self.data / "browser"
+
+    @property
+    def panel_profile(self) -> Path:
+        """更新面板使用独立 Chromium 配置，避免和 dsh 应用窗口抢同一实例。"""
+        return self.data / "panel-browser"
 
     @property
     def config(self) -> Path:

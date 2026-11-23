@@ -11,7 +11,7 @@ import traceback
 import unicodedata
 from pathlib import Path
 
-from . import __version__, actions, install, paths, platform
+from . import __version__, actions, install, paths, platform, service
 from . import settings as settings_mod
 from .context import Context
 
@@ -199,6 +199,29 @@ def _cmd_version(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_updates(args: argparse.Namespace) -> int:
+    from . import updates
+
+    context = _context(args)
+    if args.panel:
+        from . import updates_panel
+
+        try:
+            return updates_panel.run(context, profile=args.profile, timeout=args.timeout)
+        except Exception as exc:  # noqa: BLE001 - GUI 启动失败要有明确出口
+            _report_error(exc)
+            return 1
+
+    report = updates.check(context.settings, profile=args.profile, timeout=args.timeout)
+    if args.json:
+        _emit(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))
+    else:
+        _emit(updates.format_report(report))
+    if report.update_count:
+        return 1
+    return 2 if report.errors else 0
+
+
 HANDLERS = {
     "open": _cmd_open,
     "start": _cmd_start,
@@ -207,6 +230,7 @@ HANDLERS = {
     "status": _cmd_status,
     "doctor": _cmd_doctor,
     "tray": _cmd_tray,
+    "updates": _cmd_updates,
     "install": _cmd_install,
     "uninstall": _cmd_uninstall,
     "version": _cmd_version,
@@ -251,6 +275,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("status", "查看服务状态"),
         ("doctor", "打印依赖发现结果与运行状态"),
         ("tray", "启动系统托盘（双击 exe 时的行为）"),
+        ("updates", "检查 dsh 与已安装插件的更新"),
         ("uninstall", "删除桌面入口"),
         ("version", "打印版本"),
     ):
@@ -258,6 +283,21 @@ def build_parser() -> argparse.ArgumentParser:
         _add_common(sub)
         if name in {"status", "doctor"}:
             sub.add_argument("--json", action="store_true", help="以 JSON 输出")
+        if name == "updates":
+            output = sub.add_mutually_exclusive_group()
+            output.add_argument("--json", action="store_true", help="以 JSON 输出")
+            output.add_argument("--panel", action="store_true", help="打开可点击升级的更新面板")
+            sub.add_argument(
+                "--profile",
+                default=service.WEB_PROFILE,
+                help=f"要检查的 dsh profile（默认 {service.WEB_PROFILE}）",
+            )
+            sub.add_argument(
+                "--timeout",
+                type=float,
+                default=30.0,
+                help="单次 registry / 包管理器查询的秒数（默认 30）",
+            )
         sub.set_defaults(handler=HANDLERS[name])
 
     install_parser = subparsers.add_parser("install", help="创建桌面入口")

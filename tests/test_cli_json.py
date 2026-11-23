@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from dshlauncher import __main__ as cli
-from dshlauncher import doctor, paths
+from dshlauncher import doctor, paths, updates
 
 
 @pytest.fixture(autouse=True)
@@ -33,3 +33,49 @@ def test_doctor_json(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixt
     assert cli.main(["doctor", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload == [{"name": "a", "value": "b"}, {"name": "c", "value": "d"}]
+
+
+def _update_report(*, update: bool) -> updates.UpdateReport:
+    dsh = updates.DshUpdate(
+        "@deepseek-ai/dsh",
+        "0.2.2-rc.2",
+        "0.2.2-rc.5",
+        update,
+        True,
+        "npm",
+        "npm install -g @deepseek-ai/dsh@0.2.2-rc.5",
+    )
+    return updates.UpdateReport(
+        "2026-11-23T00:00:00",
+        dsh,
+        updates.ProfileReport("web", "/tmp/web", 0),
+    )
+
+
+def test_updates_json_exit_code(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(updates, "check", lambda *args, **kwargs: _update_report(update=True))
+    assert cli.main(["updates", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["update_count"] == 1
+    assert payload["dsh"]["latest"] == "0.2.2-rc.5"
+
+
+def test_updates_json_up_to_date(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(updates, "check", lambda *args, **kwargs: _update_report(update=False))
+    assert cli.main(["updates", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["update_count"] == 0
+
+
+def test_updates_panel_delegates_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dshlauncher import updates_panel
+
+    calls: dict = {}
+
+    def fake_run(context, *, profile: str, timeout: float) -> int:
+        calls.update(profile=profile, timeout=timeout)
+        return 0
+
+    monkeypatch.setattr(updates_panel, "run", fake_run)
+    assert cli.main(["updates", "--panel", "--profile", "dsh-tui", "--timeout", "5"]) == 0
+    assert calls == {"profile": "dsh-tui", "timeout": 5.0}
