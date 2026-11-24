@@ -37,6 +37,7 @@ class JupyterAdapter:
         id="jupyter",
         label="Jupyter Lab",
         description="uv tool 安装的 Jupyter Lab",
+        icon="jupyter",
         default_port=8888,
         fallback_ports=FALLBACK_PORTS,
         takeover=False,

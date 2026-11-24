@@ -39,6 +39,11 @@ export function toast(message, kind = "") {
   setTimeout(() => node.remove(), 5200);
 }
 
+export function serviceIcon(service, className = "service-icon") {
+  if (!service?.icon) return "";
+  return `<img class="${className}" src="/icons/${encodeURIComponent(service.icon)}.png" alt="">`;
+}
+
 export function activeNav(path) {
   if (path.startsWith("/services/")) return "/";
   if (path === "/diagnostics") return "/diagnostics";
@@ -117,7 +122,7 @@ export function shell(main, path) {
     return `<a class="${cls}" data-tone="${tone}" href="#${href}"><span class="nav-icon">${icon}</span>${label}</a>`;
   }).join("")}`).join("");
   app.innerHTML = `<aside class="sidebar">
-    <div class="brand"><div class="brand-mark">W</div><div>
+    <div class="brand"><img class="brand-mark" src="/icons/control.png" alt=""><div>
       <div class="brand-name">Web 服务启动器</div>
       <div class="brand-sub">LOCAL CONTROL CENTER</div>
     </div></div>
@@ -130,8 +135,8 @@ export function shell(main, path) {
   q("main").innerHTML = main;
 }
 
-export function pageHead(title, sub, actions = "") {
-  return `<div class="page-head"><div><h1>${esc(title)}</h1>${sub ? `<div class="sub">${sub}</div>` : ""}</div>
+export function pageHead(title, sub, actions = "", icon = "") {
+  return `<div class="page-head"><div><div class="page-title">${icon}<h1>${esc(title)}</h1></div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>
     <div class="toolbar">${actions}</div></div>`;
 }
 

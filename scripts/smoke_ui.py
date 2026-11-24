@@ -62,6 +62,7 @@ MODULES = (
     "/pages/diagnostics.js",
     "/pages/about.js",
 )
+ICONS = ("/icons/control.png", "/icons/dsh.png", "/icons/jupyter.png")
 
 
 class Chrome:
@@ -350,6 +351,14 @@ def main() -> int:
                 if bad:
                     raise SystemExit(f"smoke 模块失败：{bad}")
                 print(f"PASS {len(modules)} static modules via CDP")
+                icon_rows = page.evaluate(
+                    "Promise.all("
+                    f"{json.dumps(list(ICONS))}.map(async (path) => [path, (await fetch(path)).status]))"
+                )
+                bad_icons = [row for row in icon_rows if row[1] != 200]
+                if bad_icons:
+                    raise SystemExit(f"smoke 图标失败：{bad_icons}")
+                print(f"PASS {len(icon_rows)} app icons via CDP")
             finally:
                 page.close()
         finally:

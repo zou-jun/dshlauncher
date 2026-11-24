@@ -19,3 +19,6 @@ def test_create_uses_ui_and_cleans_legacy(tmp_path: Path, monkeypatch: pytest.Mo
     assert "New-Link 'weblauncher.lnk' 'ui'" in script
     assert "dsh web.lnk" in script
     assert "New-Link 'dsh 控制台.lnk'" not in script
+    assert "control.ico,0" in script
+    assert "dsh.ico,0" in script
+    assert "jupyter.ico,0" in script

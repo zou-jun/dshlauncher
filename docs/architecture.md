@@ -54,6 +54,7 @@ flowchart TB
 - `ServiceSpec.console_tools` 为 `(slug, label)` 元组，例如 dsh 的 `("updates", "更新")`、
   Jupyter 的 `("kernels", "内核")` / `("workdirs", "工作目录")`；前端用 `servicePath(id, slug)` 生成链接。
 - 每个页面调用 `shell()` 时同时传面包屑和服务标签，保证从任意子页面都能回到总览或服务根。
+- 图标资源由 `icons.py` 统一从 `assets/` 定位：控制台 `control`、dsh `dsh`、Jupyter `jupyter`；`ServiceSpec.icon` 只暴露名称，前端通过 `/icons/<name>.png` 渲染。
 
 ## 单窗口浏览器配置
 
@@ -94,7 +95,7 @@ flowchart TB
 
 ```python
 class ServiceAdapter(Protocol):
-    spec: ServiceSpec  # id / 默认端口 / 回退端口 / 是否接管 / console_tools
+    spec: ServiceSpec  # id / 默认端口 / 回退端口 / 是否接管 / console_tools / icon
     settings: Any  # 该服务的配置对象（含 UI 字段）
 
     def prepare(self, *, host, port) -> LaunchPlan: ...

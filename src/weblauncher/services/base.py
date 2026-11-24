@@ -25,6 +25,8 @@ class ServiceSpec:
     supports_updates: bool = False
     open_on_start: bool = False
     description: str = ""
+    #: 控制台图标名称；对应 icons.py 中的内置资源。
+    icon: str = ""
     #: 该服务的控制台子页（slug, label）；路径固定为 /services/<id>/<slug>。
     console_tools: tuple[tuple[str, str], ...] = ()
 

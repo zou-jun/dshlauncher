@@ -1,5 +1,5 @@
 import {
-  state, esc, api, shell, pageHead, breadcrumb, serviceTabs, servicePath,
+  state, esc, api, shell, pageHead, breadcrumb, serviceTabs, servicePath, serviceIcon,
 } from "../core.js";
 import { pill } from "./status.js";
 import { loadLogs } from "./logs.js";
@@ -22,7 +22,7 @@ function renderService(service) {
     { label: service.label, path: servicePath(service.id) },
     { label: "概览" },
   ]);
-  shell(`${crumbs}${pageHead(service.label, esc(service.description || service.id), "")}
+  shell(`${crumbs}${pageHead(service.label, esc(service.description || service.id), "", serviceIcon(service, "page-icon"))}
     ${serviceTabs(service, "")}
     <div class="card">
       <div class="spread"><h2>服务状态</h2>${pill(service)}</div>

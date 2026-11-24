@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from .. import __version__
+from .. import __version__, icons
 from ..services.dsh import updates as dsh_updates
 from .backend import ControlBackend, ControlError
 from .jobs import JobManager
@@ -143,8 +143,21 @@ class _Handler(BaseHTTPRequestHandler):
     def _styles(self, match, query, payload):
         self._static("styles.css", "text/css; charset=utf-8")
 
+    def _icon(self, match, query, payload):
+        try:
+            body = icons.read(match["name"])
+        except (KeyError, FileNotFoundError):
+            self._json(404, {"error": "not found"})
+            return
+        self._send(200, body, "image/png")
+
     def _favicon(self, match, query, payload):
-        self._send(204, b"", "image/x-icon")
+        try:
+            body = icons.read("control")
+        except FileNotFoundError:
+            self._send(204, b"", "image/x-icon")
+            return
+        self._send(200, body, "image/png")
 
     def _meta_route(self, match, query, payload):
         self._meta()

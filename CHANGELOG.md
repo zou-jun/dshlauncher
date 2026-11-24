@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.1
+
+- 控制台、dsh、Jupyter 使用独立图标：控制台为蓝色 `W`，dsh 沿用黑色透明鲸鱼，Jupyter 使用 Wikimedia Commons 的官方 logo。
+- Windows `.lnk` 与 Linux `.desktop` 按入口分配图标；打包产物和设备部署同步包含 `control` / `dsh` / `jupyter` 的 PNG 与 ICO。
+- 控制台增加图标路由、页面图标和服务卡片图标，favicon 使用控制台图标。
+
 ## 0.10.0
 
 - 控制台改为服务优先的信息架构：左侧栏按「服务 / 配置 / 其他」分组，诊断/设置归入配置区并用图标颜色区分；服务日志、诊断、设置和专属工具都在 `#/services/<id>/` 子树。

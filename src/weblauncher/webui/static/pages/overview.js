@@ -1,4 +1,4 @@
-import { state, esc, api, shell, pageHead, empty, servicePath } from "../core.js";
+import { state, esc, api, shell, pageHead, empty, servicePath, serviceIcon } from "../core.js";
 import { pill } from "./status.js";
 
 export async function loadOverview() {
@@ -26,7 +26,7 @@ function serviceCard(service) {
   const unavailable = Boolean(service.error);
   return `<article class="card service-card">
     <div class="service-top"><div>
-      <div class="service-title"><span class="dot ${service.running ? "ok" : ""}"></span>${esc(service.label)}</div>
+      <div class="service-title">${serviceIcon(service)}<span class="dot ${service.running ? "ok" : ""}"></span>${esc(service.label)}</div>
       <div class="service-desc">${esc(service.description || service.id)}</div>
     </div>${pill(service)}</div>
     <div class="service-meta">

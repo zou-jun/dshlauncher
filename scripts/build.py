@@ -20,7 +20,7 @@ DATA_NAME = ".weblauncher"
 LEGACY_DATA_NAME = ".dshlauncher"
 SAFE_DIRS = {DATA_NAME, LEGACY_DATA_NAME}
 APP_NAME = "weblauncher.exe" if sys.platform == "win32" else "weblauncher"
-ICON = ROOT / "packaging" / "assets" / "app.png"
+ASSETS = ROOT / "packaging" / "assets"
 
 
 def build() -> None:
@@ -50,10 +50,12 @@ def deploy() -> None:
 
     try:
         _sync(source)
-        if ICON.is_file():
-            assets = APP / "assets"
-            assets.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(ICON, assets / ICON.name)
+        if ASSETS.is_dir():
+            target_assets = APP / "assets"
+            target_assets.mkdir(parents=True, exist_ok=True)
+            for asset in ASSETS.iterdir():
+                if asset.is_file():
+                    shutil.copy2(asset, target_assets / asset.name)
     except (shutil.Error, OSError) as exc:
         raise SystemExit(
             "部署失败：目标文件写不进去，通常是被其它程序占用"

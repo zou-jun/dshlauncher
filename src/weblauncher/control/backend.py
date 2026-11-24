@@ -77,6 +77,7 @@ class ControlBackend:
                 "id": context.service_id,
                 "label": context.spec.label,
                 "description": context.spec.description,
+                "icon": context.spec.icon,
                 "tools": [{"slug": slug, "label": label} for slug, label in context.spec.console_tools],
                 "running": False,
                 "error": f"{type(exc).__name__}: {exc}",
@@ -84,6 +85,7 @@ class ControlBackend:
         data = status.as_dict()
         data["id"] = context.service_id
         data["description"] = context.spec.description
+        data["icon"] = context.spec.icon
         data["open_on_start"] = context.spec.open_on_start
         data["supports_updates"] = context.spec.supports_updates
         data["tools"] = [{"slug": slug, "label": label} for slug, label in context.spec.console_tools]
@@ -114,6 +116,7 @@ class ControlBackend:
                     "id": service_id,
                     "label": spec.label if spec is not None else service_id,
                     "description": spec.description if spec is not None else "服务配置不可用",
+                    "icon": spec.icon if spec is not None else "",
                     "open_on_start": spec.open_on_start if spec is not None else False,
                     "supports_updates": spec.supports_updates if spec is not None else False,
                     "tools": (

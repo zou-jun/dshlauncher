@@ -13,15 +13,16 @@ import stat
 import sys
 from pathlib import Path
 
-from .. import paths
+from .. import icons, paths
 
 MAIN_NAME = "weblauncher.desktop"
+MAIN_ICON = "control"
 SERVICE_ENTRIES = {
-    "dsh": ("dsh web", "ui dsh"),
-    "jupyter": ("Jupyter Lab", "ui jupyter"),
+    "dsh": ("dsh web", "ui dsh", "dsh"),
+    "jupyter": ("Jupyter Lab", "ui jupyter", "jupyter"),
 }
-ICON_NAME = "weblauncher"
 ICON_SIZE = 256
+ICON_NAMES = ("control", "dsh", "jupyter")
 
 #: 旧版本写过的位置/名字，install 与 uninstall 都顺手清理。
 LEGACY_NAMES = (
@@ -53,33 +54,30 @@ def applications_dir() -> Path:
     return data_home() / "applications"
 
 
-def icon_source() -> Path | None:
-    candidates: list[Path] = []
-    if getattr(sys, "frozen", False):
-        candidates.append(Path(sys.executable).resolve().parent / "assets" / "app.png")
-    else:
-        candidates.append(paths.executable_dir() / "packaging" / "assets" / "app.png")
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    return None
+def icon_source(name: str) -> Path | None:
+    return icons.path(name, ".png")
 
 
-def icon_path() -> Path:
-    return data_home() / "icons" / "hicolor" / f"{ICON_SIZE}x{ICON_SIZE}" / "apps" / f"{ICON_NAME}.png"
+def icon_path(name: str) -> Path:
+    return data_home() / "icons" / "hicolor" / f"{ICON_SIZE}x{ICON_SIZE}" / "apps" / f"weblauncher-{name}.png"
 
 
-def install_icon(icon: Path | None) -> Path | None:
-    """把图标放进 hicolor 主题目录；显式图标只引用，不复制。"""
+def install_icons(icon: Path | None) -> dict[str, Path | None]:
+    """把内置图标放进 hicolor 主题目录；显式图标只引用，不复制。"""
     if icon is not None:
-        return icon.expanduser()
-    source = icon_source()
-    if source is None:
-        return None
-    target = icon_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, target)
-    return target
+        shared = icon.expanduser()
+        return {name: shared for name in ICON_NAMES}
+    installed: dict[str, Path | None] = {}
+    for name in ICON_NAMES:
+        source = icon_source(name)
+        if source is None:
+            installed[name] = None
+            continue
+        target = icon_path(name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        installed[name] = target
+    return installed
 
 
 def _entry(label: str, action: str, icon: Path | None) -> str:
@@ -109,27 +107,27 @@ def create(
 ) -> list[Path]:
     applications = applications_dir()
     applications.mkdir(parents=True, exist_ok=True)
-    installed_icon = install_icon(icon)
-
-    entries: dict[str, tuple[str, str]] = {MAIN_NAME: ("Web 服务启动器", "ui")}
-    for service in services:
-        label_action = SERVICE_ENTRIES.get(service)
-        if label_action is not None:
-            entries[f"{service}.desktop"] = label_action
-
-    written: list[Path] = []
-    for filename, (label, action) in entries.items():
-        path = applications / filename
-        path.write_text(_entry(label, action, installed_icon), "utf-8")
-        path.chmod(path.stat().st_mode | stat.S_IXUSR)
-        written.append(path)
+    installed_icons = install_icons(icon)
     for directory in [applications, *_desktop_dirs()]:
         for name in LEGACY_NAMES:
             legacy = directory / name
             if legacy.is_file():
                 legacy.unlink()
-    if icon is None and installed_icon is not None:
-        written.append(installed_icon)
+
+    entries: dict[str, tuple[str, str, str]] = {MAIN_NAME: ("Web 服务启动器", "ui", MAIN_ICON)}
+    for service in services:
+        entry = SERVICE_ENTRIES.get(service)
+        if entry is not None:
+            entries[f"{service}.desktop"] = entry
+
+    written: list[Path] = []
+    for filename, (label, action, icon_name) in entries.items():
+        path = applications / filename
+        path.write_text(_entry(label, action, installed_icons.get(icon_name)), "utf-8")
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+        written.append(path)
+    if icon is None:
+        written.extend(item for item in installed_icons.values() if item is not None)
     return written
 
 
@@ -142,8 +140,13 @@ def remove() -> list[Path]:
             if path.is_file():
                 path.unlink()
                 removed.append(path)
-    icon = icon_path()
-    if icon.is_file():
-        icon.unlink()
-        removed.append(icon)
+    for name in ICON_NAMES:
+        icon = icon_path(name)
+        if icon.is_file():
+            icon.unlink()
+            removed.append(icon)
+    old_icon = data_home() / "icons" / "hicolor" / f"{ICON_SIZE}x{ICON_SIZE}" / "apps" / "weblauncher.png"
+    if old_icon.is_file():
+        old_icon.unlink()
+        removed.append(old_icon)
     return removed

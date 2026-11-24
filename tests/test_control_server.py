@@ -136,6 +136,8 @@ def test_service_cards_expose_relative_tools(console) -> None:
     assert ("updates", "更新") in tools["dsh"]
     assert ("kernels", "内核") in tools["jupyter"]
     assert ("workdirs", "工作目录") in tools["jupyter"]
+    icons = {item["id"]: item["icon"] for item in payload["services"]}
+    assert icons == {"dsh": "dsh", "jupyter": "jupyter"}
 
 
 def test_unavailable_service_stays_in_overview(tmp_path: Path) -> None:

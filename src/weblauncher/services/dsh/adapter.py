@@ -20,6 +20,7 @@ class DshAdapter:
         id="dsh",
         label="dsh web",
         description="DeepSeek Harness web 服务",
+        icon="dsh",
         default_port=3080,
         fallback_ports=ports.FALLBACK_PORTS,
         takeover=True,

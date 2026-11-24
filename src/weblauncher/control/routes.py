@@ -24,6 +24,7 @@ ROUTES: tuple[Route, ...] = (
     _route(r"/core\.js", "GET", "_core_js"),
     _route(r"/pages/(?P<name>.+\.js)", "GET", "_page_js"),
     _route(r"/styles\.css", "GET", "_styles"),
+    _route(r"/icons/(?P<name>[a-z]+)\.png", "GET", "_icon"),
     _route(r"/favicon\.ico", "GET", "_favicon"),
     _route(r"/api/meta", "GET", "_meta_route"),
     _route(r"/api/services", "GET", "_services"),

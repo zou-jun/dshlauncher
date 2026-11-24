@@ -36,9 +36,20 @@ weblauncher.exe open dsh       :: 只打开/置前 dsh 窗口，不驻留托盘
 > GUI 子系统的 exe 由 `cmd.exe` 启动时不会阻塞提示符，输出会稍后出现在同一个控制台里。
 > 需要等待退出码或串联命令时用 `start /wait weblauncher.exe status`（PowerShell 同样适用）。
 
+`install` 创建的入口使用各自图标：
+
+| 入口 | 图标 |
+|---|---|
+| 控制台 | 蓝色渐变 `W` |
+| dsh web | 黑色透明鲸鱼 |
+| Jupyter Lab | Jupyter 官方 logo |
+
+控制台和服务卡片也会显示对应图标。Jupyter 图标取自 Wikimedia Commons 的
+[`Jupyter_logo.svg`](https://commons.wikimedia.org/wiki/Special:FilePath/Jupyter_logo.svg)。
+
 ### Linux 安装
 
-解压后是 `weblauncher`（单文件）+ `_internal/` + `assets/app.png`：
+解压后是 `weblauncher`（单文件）+ `_internal/` + `assets/`（含每个应用的图标）：
 
 ```bash
 ./weblauncher doctor        # 自检：会话类型、依赖、窗口控制能力、端口
@@ -405,7 +416,7 @@ make deploy         # 只重新部署（复用上次构建）
 等价的手写命令：`uv run python scripts/build.py [--skip-build]`。
 
 产物是 `.build/dist/weblauncher/`：单个 `weblauncher.exe`（Windows）/ `weblauncher`（Linux）
-+ `_internal/`（约 30 MB）+ `assets/app.png`。
++ `_internal/`（约 30 MB）+ `assets/`（应用图标 `app.*`、`control.*`、`dsh.*`、`jupyter.*`）。
 必须在目标平台上各自构建（PyInstaller 不交叉编译）；`app/` 是部署目录，`app/.weblauncher/`
 的数据不会被构建清理。
 
@@ -418,7 +429,7 @@ make deploy         # 只重新部署（复用上次构建）
 uv run pytest            # 纯逻辑单测
 uv run ruff check .      # lint
 uv run ruff format .     # 格式化
-make smoke-ui            # 真浏览器：总览/设置/服务/日志/诊断异步 Job + 静态模块
+make smoke-ui            # 真浏览器：总览/设置/服务/日志/诊断异步 Job + 静态模块 + 图标
 make smoke-ui ARGS="--exe app/weblauncher.exe"  # 打包版同一套检查
 ```
 
