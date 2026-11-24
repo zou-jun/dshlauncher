@@ -85,6 +85,9 @@ class JupyterAdapter:
         ]
         if self.settings.kernel:
             argv.append(f"--MappingKernelManager.default_kernel_name={self.settings.kernel}")
+            # Jupyter 会在没有 python3 时补一个 native 内核（当前进程解释器），
+            # 启动器列表只认 kernelspec 目录；已指定默认内核时关掉兜底，避免多出未注册的内核。
+            argv.append("--KernelSpecManager.ensure_native_kernel=False")
         env = paths.child_env()
         env["JUPYTER_TOKEN"] = token
         env["PYTHONUNBUFFERED"] = "1"

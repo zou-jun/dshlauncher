@@ -313,7 +313,7 @@ weblauncher start jupyter          # 或直接 weblauncher open jupyter
 - **工作目录**：`--ServerApp.root_dir`，决定文件浏览器范围；`jupyter workdir use` 立即持久化，最近 10 个目录记在 `memory.toml`。
 - **内核**：注册的是目标解释器的绝对路径；目标 venv 必须能 `import ipykernel`，缺失时 `kernel add` 会给出命令，`--install-ipykernel` 可显式调用 `uv pip install`。
 - **命名**：`--name` 是 kernelspec id（小写字母/数字/._-），`--display-name` 是 Jupyter 里看到的名字，可写中文。
-- **默认内核**：`kernel use` 写入 `memory.toml`，服务启动时通过 `--MappingKernelManager.default_kernel_name` 注入；只影响新建 notebook，已有 notebook 保持自己的 kernel。
+- **默认内核**：`kernel use` 写入 `memory.toml`，服务启动时通过 `--MappingKernelManager.default_kernel_name` 注入；只影响新建 notebook，已有 notebook 保持自己的 kernel。已指定默认内核时同时传 `--KernelSpecManager.ensure_native_kernel=False`，内核列表只认 kernelspec 目录，不会多出 Jupyter 自带的 python3 兜底。
 - **按目录记忆**：从哪个工作目录选的 kernel 会被记住；再次切回该目录时自动恢复（`[jupyter] remember_per_workdir = false` 可关）。
 - **token**：默认每次启动随机生成，通过子进程环境变量传入，不出现在命令行；日志里 Jupyter 会打码成 `?token=...`，启动器自己拼 URL。
 - **停止**：先 `POST /api/shutdown`（内核一起退），超时才杀进程树。

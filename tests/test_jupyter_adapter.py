@@ -32,7 +32,14 @@ def test_prepare_uses_token_env_and_deterministic_flags(tmp_path: Path) -> None:
     assert f"--ServerApp.root_dir={tmp_path}" in plan.argv
     assert "--ServerApp.base_url=/lab2/" in plan.argv
     assert "--MappingKernelManager.default_kernel_name=proj" in plan.argv
+    assert "--KernelSpecManager.ensure_native_kernel=False" in plan.argv
     assert plan.url == "http://127.0.0.1:18888/lab2/lab?token=fixed"
+
+
+def test_prepare_keeps_native_kernel_without_default(tmp_path: Path) -> None:
+    plan = _adapter(tmp_path).prepare(host="127.0.0.1", port=18888)
+    assert not any(arg.startswith("--MappingKernelManager.") for arg in plan.argv)
+    assert not any(arg.startswith("--KernelSpecManager.") for arg in plan.argv)
 
 
 def test_prepare_rejects_missing_root(tmp_path: Path) -> None:

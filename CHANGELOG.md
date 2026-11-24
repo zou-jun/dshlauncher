@@ -2,6 +2,7 @@
 
 ## 0.10.1
 
+- Jupyter 已指定默认内核时传 `--KernelSpecManager.ensure_native_kernel=False`：不再出现 Jupyter 自带、启动器未注册的 `python3` 兜底内核，内核列表与 `weblauncher jupyter kernel list` 一致。
 - 控制台、dsh、Jupyter 使用独立图标：控制台为蓝色 `W`，dsh 沿用黑色透明鲸鱼，Jupyter 使用 Wikimedia Commons 的官方 logo。
 - Windows `.lnk` 与 Linux `.desktop` 按入口分配图标；打包产物和设备部署同步包含 `control` / `dsh` / `jupyter` 的 PNG 与 ICO。
 - 控制台增加图标路由、页面图标和服务卡片图标，favicon 使用控制台图标。
