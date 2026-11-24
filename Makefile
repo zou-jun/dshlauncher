@@ -15,7 +15,7 @@ ARGS ?=
 SERVICE ?= all
 
 .DEFAULT_GOAL := help
-.PHONY: help env lint format fmt-check test check open start stop restart status doctor updates jupyter ui tray smoke build deploy clean distclean
+.PHONY: help env lint format fmt-check test check open start stop restart status doctor updates jupyter ui tray smoke smoke-ui build deploy clean distclean
 
 help:  ## 列出全部目标
 	@$(PY) -c "import pathlib,re;[print(f'  {m[1]:<10}{m[2]}') for m in (re.match(r'^([a-z][a-z-]*):.*?##\s*(.+)', l.rstrip()) for l in pathlib.Path('Makefile').read_text('utf-8').splitlines()) if m]"
@@ -74,6 +74,9 @@ smoke:  ## 真机冒烟：start all → status all → stop all
 	@$(CLI) start all
 	@$(CLI) status all
 	@$(CLI) stop all
+
+smoke-ui:  ## headless Chromium 跑总览/设置/服务/日志/诊断与静态模块；ARGS="--exe app/weblauncher.exe"
+	@$(PY) scripts/smoke_ui.py $(ARGS)
 
 build:  ## PyInstaller 打包并部署到 app/
 	@$(PY) scripts/build.py

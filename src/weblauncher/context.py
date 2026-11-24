@@ -10,6 +10,7 @@ from . import memory as memory_mod
 from . import platform
 from . import state as state_mod
 from .paths import Paths
+from .services.base import ServiceAdapter
 from .supervisor import Supervisor
 
 
@@ -18,8 +19,7 @@ class ServiceContext:
     runtime: Runtime
     service_id: str
     settings: Any
-    adapter: Any
-    definition: Any
+    adapter: ServiceAdapter
 
     @property
     def paths(self) -> Paths:

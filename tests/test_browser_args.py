@@ -114,3 +114,74 @@ def test_launch_can_force_new_window(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert browser.launch(settings, "http://x", dedupe=False) == "new"
     assert found == []
     assert calls
+
+
+def test_single_window_first_launch_uses_normal_window(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[list[str]] = []
+
+    class Backend:
+        def detach_kwargs(self, *, breakaway: bool = True) -> dict[str, int]:
+            return {"creationflags": 0}
+
+        def process_names(self, browser: str) -> set[str]:
+            return {"chrome.exe"}
+
+        def supports_window_control(self, ozone: str | None = None) -> bool:
+            return True
+
+        def work_area(self) -> None:
+            return None
+
+    monkeypatch.setattr(browser.platform, "load", lambda: Backend())
+    monkeypatch.setattr(
+        browser.discovery,
+        "browser_exe",
+        lambda value: discovery.Browser("chrome", Path("chrome.exe")),
+    )
+    monkeypatch.setattr(browser, "_profile_pids", lambda *args: set())
+    monkeypatch.setattr(browser, "_wait_window", lambda *args, **kwargs: None)
+    monkeypatch.setattr(browser.paths, "child_env", lambda: {})
+    monkeypatch.setattr(browser.subprocess, "Popen", lambda args, **kwargs: calls.append(args))
+
+    settings = Settings(profile_dir=tmp_path / "browser", single_window=True)
+    assert browser.launch(settings, "http://127.0.0.1:1/") == "new"
+    args = calls[0]
+    assert not any(arg.startswith("--app=") for arg in args)
+    assert "--new-window" in args
+    assert args[-1] == "http://127.0.0.1:1/"
+
+
+def test_single_window_existing_profile_appends_tab(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    class Backend:
+        def detach_kwargs(self, *, breakaway: bool = True) -> dict[str, int]:
+            return {"creationflags": 0}
+
+        def process_names(self, browser: str) -> set[str]:
+            return {"chrome.exe"}
+
+        def supports_window_control(self, ozone: str | None = None) -> bool:
+            return True
+
+        def work_area(self) -> None:
+            return None
+
+    monkeypatch.setattr(browser.platform, "load", lambda: Backend())
+    monkeypatch.setattr(
+        browser.discovery,
+        "browser_exe",
+        lambda value: discovery.Browser("chrome", Path("chrome.exe")),
+    )
+    monkeypatch.setattr(browser, "_profile_pids", lambda *args: {1})
+    monkeypatch.setattr(browser.paths, "child_env", lambda: {})
+    monkeypatch.setattr(browser.subprocess, "Popen", lambda args, **kwargs: calls.append(args))
+
+    settings = Settings(profile_dir=tmp_path / "browser", single_window=True)
+    assert browser.launch(settings, "http://127.0.0.1:2/") == "tab"
+    args = calls[0]
+    assert not any(arg.startswith("--app=") for arg in args)
+    assert "--new-window" not in args
+    assert args[-1] == "http://127.0.0.1:2/"

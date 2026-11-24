@@ -23,9 +23,10 @@ class ServiceSpec:
     #: 没有可信 state 时是否允许按端口扫描并停止（只对 dsh 开启）。
     stop_untracked: bool = False
     supports_updates: bool = False
-    auto_start: bool = False
     open_on_start: bool = False
     description: str = ""
+    #: 控制台里该服务的自定义入口（例如 dsh 更新、Jupyter 配置）。
+    console_links: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

@@ -4,4 +4,4 @@
 就绪判定与停止方式在 `weblauncher.services.<id>` 适配器里。
 """
 
-__version__ = "0.7.1"
+__version__ = "0.9.0"

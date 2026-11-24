@@ -5,8 +5,10 @@
 - **常驻 Agent**：托盘图标只是入口；Agent 内运行控制台 HTTP 服务、动作任务、升级任务与服务控制器。
 - **CLI**：短命；通过 `Runtime` 读取同一份配置/记忆，直接调用服务层；`ui` 只负责打开控制台。
 - **被托管服务**：每个服务是一个独立分离进程（dsh = node，Jupyter = uv tool 的 python），
-  关闭终端/控制台窗口不影响；Agent 退出可选择保留或停止。
-- **浏览器窗口**：控制台使用独立 `control-browser/` profile；每个服务仍使用自己的 Chromium `--user-data-dir`。
+  关闭终端/控制台窗口不影响；Agent 退出可选择保留或停止。Agent 启动只打开控制台，不自动拉起任何服务。
+- **控制台信息架构**：左侧栏只放启动器通用功能；dsh 更新/设置、Jupyter 配置/设置挂在总览对应服务卡片。
+  日志在 Web 页读取，诊断和设置都按「启动器通用 / 服务独立」分组。
+- **浏览器窗口**：默认控制台使用独立 `control-browser/` profile，每个服务使用自己的 Chromium `--user-data-dir`；`[ui] single_window = true` 时统一使用 `tabbed-browser/`，控制台和服务是同一普通窗口里的标签页。
 
 ```mermaid
 flowchart TB
@@ -38,16 +40,19 @@ flowchart TB
 | 共享 | `config.py` | `[launcher] [ui] [dsh] [jupyter]` 读取；`config set` 按行编辑保留注释 |
 | 共享 | `memory.py` | 启动器写的选择记忆（工作目录、最近目录、内核、按目录内核） |
 | 共享 | `ports.py` | 真实 bind 探测、Windows 保留段、候选端口 |
+| 共享 | `inspector.py` | 监听端口一次扫描 + 短 TTL 缓存，供占用者/进程判定复用 |
 | 共享 | `process.py` | 分离启动、进程树终止、pid + create_time |
 | 共享 | `supervisor.py` | 通用生命周期：端口规划 → spawn → 就绪 → 状态 → 停止 |
+| 共享 | `controller.py` | `ServiceController` 动作互斥、`ServiceControllerRegistry` 线程安全快照 |
 | 共享 | `state.py` / `logs.py` / `status.py` | 状态文件、日志尾部/轮转、展示快照 |
 | 共享 | `discovery.py` / `browser.py` | Chromium 发现、应用窗口、一次性 ticket |
 | 服务层 | `services/base.py` | `ServiceSpec` / `LaunchPlan` / `ServiceAdapter` 协议 |
+| 服务层 | `services/common_settings.py` | host/port/browser/ozone/profile/window 的共用解析 |
 | 服务层 | `services/registry.py` | 服务 id 列表、`all`/逗号解析、按 id 组装 settings + adapter |
 | 服务层 | `services/dsh/` | node/bin.js 发现、token URL 解析、接管端口、updates/upgrade |
-| 服务层 | `services/jupyter/` | uv tool 发现、HTTP 就绪/关闭、kernelspec 注册、工作目录记忆 |
-| UI | `control/` | 控制台 HTTP 服务、一次性入口、Cookie/CSRF、JSON API、任务 |
-| UI | `webui/static/` | 无构建 SPA：总览、服务、更新、Jupyter、设置、诊断、关于 |
+| 服务层 | `services/jupyter/` | uv tool 发现、HTTP 就绪/关闭、kernelspec 注册、工作目录记忆；`operations.py` 为 CLI/HTTP 共用用例 |
+| UI | `control/` | HTTP/API 门面 + `routes` / `config_store` / `files` / `jupyter` / `updates` / `jobs` / `static_assets` |
+| UI | `webui/static/` | 无构建 ES modules：`core` + `app` 路由/事件 + `pages/` 总览/服务/日志/设置/更新/Jupyter/诊断/关于/status |
 | UI | `tray/` | 最小托盘入口、单实例/IPC、Agent 生命周期 |
 | UI | `install/` | 主控制台入口 + 每服务详情快捷方式（Windows `.lnk` / Linux `.desktop`） |
 | 平台 | `platform/` | 分离进程、窗口枚举/置前、打开路径、原生消息框 |
@@ -92,7 +97,8 @@ class ServiceAdapter(Protocol):
   memory.toml               启动器原子重写
   launcher.log              动作审计
   upgrades.log              dsh 升级日志
-  control-browser/          Web 控制台专用浏览器配置
+  control-browser/          Web 控制台专用浏览器配置（默认模式）
+  tabbed-browser/           单窗口模式共用的浏览器配置
   tray.lock / tray.json     Agent 单实例锁与 loopback IPC
   services/
     dsh/    state.json  service.log  service.lock  browser/
@@ -112,7 +118,7 @@ class ServiceAdapter(Protocol):
 
 ## 生命周期
 
-1. 控制台启动：Agent 绑定 loopback HTTP、写入一次性入口信息，打开 `control-browser/`。
+1. 控制台启动：Agent 绑定 loopback HTTP、写入一次性入口信息；默认打开 `control-browser/` 的应用窗口，单窗口模式打开 `tabbed-browser/` 的普通标签页。
 2. `Supervisor.effective_port()`：排除其它服务端口 → 探测上次/配置/回退候选。
 3. `start()`：可信 state 且进程存活 → 复用；显式换端口 → 先停旧实例。
 4. `adapter.prepare()` 生成 argv/env/cwd；核心写 `[launcher] start` 标记后分离启动。
@@ -125,16 +131,18 @@ class ServiceAdapter(Protocol):
 
 - 每个服务一把跨进程 `service.lock`，CLI 与 Agent 共用；「启动全部/停止全部」按服务 id 排序依次拿锁，避免死锁。
 - 控制台写操作进入 JobManager 后台线程；HTTP 只返回 job id，页面轮询结果；服务动作仍由控制器互斥。
+- 诊断和更新检查也通过 JobManager 执行，页面先显示“检查中”，避免同步阻塞请求线程。
+- 控制器集合通过 `ServiceControllerRegistry` 的线程安全快照读取；配置重载整体替换控制器，并把无法构建的服务保留为错误占位。
 - 控制台入口是一次性 ticket：`/boot/<ticket>` 设置 HttpOnly Cookie 后跳到 SPA；写请求校验 CSRF + Host + Origin。
 - `Supervisor` 的读操作不修改实例状态；`ServiceStatus` 是一次性快照。
-- 浏览器 dedupe 按各自 `--user-data-dir` 判定，两个服务的窗口互不干扰。
+- 默认模式下浏览器 dedupe 按各自 `--user-data-dir` 判定，两个服务的窗口互不干扰；单窗口模式共用 profile，后续打开只追加标签页，不做窗口置前。
 
 ## 新增一个服务
 
 1. 建 `services/<id>/`，实现 `ServiceAdapter`（通常 150–300 行）。
-2. 在 `services/registry.py` 的 `SERVICE_IDS` / `build()` / `_definition()` 注册。
+2. 在 `services/registry.py` 的 `SERVICE_IDS` / `build()` 注册，并把服务元数据放进该服务的 `ServiceSpec`。
 3. 在 `config.py` 文档与 `config.toml` 里加 `[<id>]` 默认值。
-4. 给控制台增加专属 API 页面/动作时，在 `control/backend.py` 与 `webui/static/app.js` 增加入口。
+4. 给控制台增加专属 API 页面/动作时，在 `control/backend.py` 与 `webui/static/pages/` 增加页面模块，并在 `app.js` 路由/事件表登记。
 5. 加适配器测试：argv、就绪、停止、进程归属、状态扩展；共享层已有契约测试。
 6. `make smoke SERVICE=<id>` 真机验证 start → status → stop。
 
@@ -145,6 +153,8 @@ class ServiceAdapter(Protocol):
 ```bash
 make check                 # ruff + 全量单测
 make smoke                 # start all → status all → stop all
+make smoke-ui              # headless Chromium 跑总览/设置/服务/日志/诊断与静态模块
+make smoke-ui ARGS="--exe app/weblauncher.exe"  # 打包版同一套浏览器检查
 make build                 # PyInstaller 打包并部署到 app/
 weblauncher doctor         # 每个服务的依赖、端口、状态
 weblauncher status all --json

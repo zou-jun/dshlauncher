@@ -119,6 +119,29 @@ def test_icon_image_loads_packaged_asset() -> None:
     assert image.size == (tray.ICON_SIZE, tray.ICON_SIZE)
 
 
+def test_startup_opens_console_without_starting_services(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = _app(data_dir)
+    app.open_console = False
+    calls: list[object] = []
+    for controller in app.controllers.values():
+        monkeypatch.setattr(controller, "run_exclusive", lambda action: calls.append(action))
+    monkeypatch.setattr(app, "_schedule_refresh", lambda: None)
+
+    app._startup()
+    assert calls == []
+
+
+def test_tray_menu_default_opens_console(data_dir: Path) -> None:
+    import pystray
+
+    app = _app(data_dir)
+    menu = app._menu(pystray)
+    defaults = [item for item in menu.items if item.default]
+    assert [item.text for item in defaults] == ["打开控制台"]
+
+
 def test_quit_stops_service_then_icon(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     app = _app(data_dir)
     events: list[str] = []

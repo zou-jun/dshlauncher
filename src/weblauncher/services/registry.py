@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from ..context import ServiceContext
+from .base import ServiceSpec
 from .dsh.adapter import DshAdapter
 from .dsh.settings import Settings as DshSettings  # noqa: F401 - 供类型检查/外部引用
 from .dsh.settings import load as load_dsh
@@ -16,18 +16,13 @@ from .jupyter.settings import load as load_jupyter
 SERVICE_IDS = ("dsh", "jupyter")
 
 
-@dataclass(frozen=True)
-class ServiceDefinition:
-    id: str
-    label: str
-    auto_start: bool
-    open_on_start: bool
-
-
-def _definition(service_id: str) -> ServiceDefinition:
+def spec(service_id: str) -> ServiceSpec:
+    """服务静态元数据；不需要构建设置/adapter，供错误占位和导航使用。"""
     if service_id == "dsh":
-        return ServiceDefinition("dsh", "dsh web", True, True)
-    return ServiceDefinition("jupyter", "Jupyter Lab", False, False)
+        return DshAdapter.spec
+    if service_id == "jupyter":
+        return JupyterAdapter.spec
+    raise KeyError(f"未知服务：{service_id}")
 
 
 def build(
@@ -46,13 +41,11 @@ def build(
         adapter = JupyterAdapter(settings, None, runtime.memory)
     else:
         raise KeyError(f"未知服务：{service_id}")
-    definition = _definition(service_id)
     return ServiceContext(
         runtime=runtime,
         service_id=service_id,
         settings=settings,
         adapter=adapter,
-        definition=definition,
     )
 
 

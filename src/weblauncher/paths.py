@@ -255,6 +255,11 @@ class Paths:
         return self.data / "control-browser"
 
     @property
+    def tabbed_profile(self) -> Path:
+        """单窗口模式：控制台与所有服务共用的 Chromium 配置。"""
+        return self.data / "tabbed-browser"
+
+    @property
     def config(self) -> Path:
         return self.data / "config.toml"
 
@@ -299,6 +304,10 @@ def launcher_log_path() -> Path:
 
 def profile_dir() -> Path:
     return Paths.current().profile
+
+
+def tabbed_profile() -> Path:
+    return Paths.current().tabbed_profile
 
 
 def config_path() -> Path:

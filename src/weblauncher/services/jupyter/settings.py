@@ -9,6 +9,7 @@ from typing import Any
 from ... import config as config_mod
 from ... import memory as memory_mod
 from ... import paths
+from ..common_settings import CommonSettings, resolve_common, settings_kwargs
 
 ENV_PREFIX = "WEBLAUNCHER_JUPYTER_"
 DEFAULT_HOST = "127.0.0.1"
@@ -23,10 +24,11 @@ def _normalize_base(value: str) -> str:
 
 
 @dataclass(frozen=True)
-class Settings:
-    host: str = DEFAULT_HOST
+class Settings(CommonSettings):
     port: int = DEFAULT_PORT
-    port_explicit: bool = False
+    start_timeout: float = DEFAULT_START_TIMEOUT
+    #: Jupyter 必须有自己的 profile；继承 CommonSettings 的全局 profile 会与 dsh 共用 cookie。
+    profile_dir: Path = field(default_factory=lambda: paths.Paths.current().service("jupyter").profile)
     root_dir: Path = field(default_factory=Path.home)
     base_url: str = DEFAULT_BASE_URL
     jupyter_bin: Path | None = None
@@ -34,32 +36,14 @@ class Settings:
     token: str | None = None
     #: 新 notebook 的默认内核（kernelspec id）。
     kernel: str | None = None
-    browser: str | None = None
-    ozone: str = "auto"
-    profile_dir: Path = field(default_factory=lambda: paths.Paths.current().service("jupyter").profile)
-    profile_explicit: bool = False
-    width_ratio: float = config_mod.WindowSettings().width_ratio
-    height_ratio: float = config_mod.WindowSettings().height_ratio
-    min_width: int = config_mod.WindowSettings().min_width
-    min_height: int = config_mod.WindowSettings().min_height
-    start_timeout: float = DEFAULT_START_TIMEOUT
-    dedupe: bool = True
     remember_per_workdir: bool = True
-
-    def window_kwargs(self) -> dict[str, Any]:
-        return {
-            "width_ratio": self.width_ratio,
-            "height_ratio": self.height_ratio,
-            "min_width": self.min_width,
-            "min_height": self.min_height,
-        }
 
 
 def _env(name: str) -> str | None:
     return config_mod.env(name, ENV_PREFIX)
 
 
-def _value(cfg: config_mod.Config, section: dict[str, Any], key: str, default: Any) -> Any:
+def _value(section: dict[str, Any], key: str, default: Any) -> Any:
     if key in section:
         return section[key]
     return default
@@ -101,8 +85,25 @@ def load(
     mem = memory if memory is not None else memory_mod.load()
     section = cfg.section("jupyter")
     defaults = Settings()
+    common = resolve_common(
+        cfg,
+        section_name="jupyter",
+        env_prefix=ENV_PREFIX,
+        host=host,
+        port=port,
+        browser=browser,
+        ozone=ozone,
+        profile_dir=profile_dir,
+        dedupe=dedupe,
+        start_timeout=start_timeout,
+        default_port=defaults.port,
+        default_start_timeout=defaults.start_timeout,
+        default_profile=defaults.profile_dir,
+        legacy_root=False,
+        launcher_timeout=False,
+    )
 
-    remember_raw = _value(cfg, section, "remember_per_workdir", None)
+    remember_raw = _value(section, "remember_per_workdir", None)
     remember = config_mod.flag(remember_raw, True) if remember_raw is not None else True
     if "remember_per_workdir" in memory_mod.section(mem, "jupyter"):
         remember = config_mod.flag(memory_mod.section(mem, "jupyter")["remember_per_workdir"], remember)
@@ -110,49 +111,26 @@ def load(
     root_value = (
         root
         or _env("ROOT")
-        or _value(cfg, section, "root_dir", None)
+        or _value(section, "root_dir", None)
         or memory_mod.get(mem, "jupyter", "workdir", None)
         or Path.home()
     )
     root_dir = Path(root_value).expanduser()
-
-    requested_port = port if port is not None else _env("PORT") or _value(cfg, section, "port", None)
     kernel_value = (
         kernel
         or _env("KERNEL")
         or effective_kernel(mem, root_dir, remember=remember)
-        or _value(cfg, section, "kernel", None)
+        or _value(section, "kernel", None)
     )
-    profile_value = profile_dir or _env("PROFILE_DIR") or _value(cfg, section, "profile_dir", None)
-    jupyter_value = jupyter_bin or _env("BIN") or _value(cfg, section, "jupyter_bin", None)
-    base_value = base_url or _env("BASE_URL") or _value(cfg, section, "base_url", DEFAULT_BASE_URL)
-
-    resolved_ozone = str(ozone or cfg.ui.ozone or defaults.ozone).strip().lower()
-    if resolved_ozone not in config_mod.OZONE_MODES:
-        raise ValueError(f"ozone 只能是 {' / '.join(config_mod.OZONE_MODES)}，收到 {resolved_ozone!r}")
+    jupyter_value = jupyter_bin or _env("BIN") or _value(section, "jupyter_bin", None)
+    base_value = base_url or _env("BASE_URL") or _value(section, "base_url", DEFAULT_BASE_URL)
 
     return Settings(
-        host=str(host or _env("HOST") or _value(cfg, section, "host", defaults.host)),
-        port=int(requested_port) if requested_port is not None else defaults.port,
-        port_explicit=requested_port is not None,
+        **settings_kwargs(common),
         root_dir=root_dir,
         base_url=_normalize_base(str(base_value)),
         jupyter_bin=Path(jupyter_value).expanduser() if jupyter_value else None,
-        token=str(_env("TOKEN") or _value(cfg, section, "token", "") or "") or None,
+        token=str(_env("TOKEN") or _value(section, "token", "") or "") or None,
         kernel=str(kernel_value) if kernel_value else None,
-        browser=str(browser or cfg.ui.browser or "") or None,
-        ozone=resolved_ozone,
-        profile_dir=Path(profile_value).expanduser() if profile_value else defaults.profile_dir,
-        profile_explicit=profile_value is not None,
-        width_ratio=cfg.ui.window.width_ratio,
-        height_ratio=cfg.ui.window.height_ratio,
-        min_width=cfg.ui.window.min_width,
-        min_height=cfg.ui.window.min_height,
-        start_timeout=float(
-            start_timeout
-            or _env("START_TIMEOUT")
-            or _value(cfg, section, "start_timeout", DEFAULT_START_TIMEOUT)
-        ),
-        dedupe=cfg.ui.dedupe if dedupe is None else dedupe,
         remember_per_workdir=remember,
     )

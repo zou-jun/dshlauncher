@@ -42,8 +42,8 @@ class JupyterAdapter:
         takeover=False,
         stop_untracked=False,
         supports_updates=False,
-        auto_start=False,
         open_on_start=False,
+        console_links=(("Jupyter 配置", "/#/jupyter"), ("Jupyter 设置", "/#/settings/jupyter")),
     )
 
     def __init__(

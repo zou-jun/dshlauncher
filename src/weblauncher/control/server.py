@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import collections
 import contextlib
 import hmac
 import json
@@ -10,82 +9,21 @@ import os
 import secrets
 import threading
 import time
-from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .. import __version__
 from ..services.dsh import updates as dsh_updates
 from .backend import ControlBackend, ControlError
+from .jobs import JobManager
+from .routes import ROUTES
+from .static_assets import StaticAssetError
+from .static_assets import read as read_static
 
 COOKIE = "weblauncher_session"
 BOOT_TTL = 120.0
 MAX_BODY = 1024 * 1024
-STATIC = Path(__file__).resolve().parent.parent / "webui" / "static"
-
-
-@dataclass
-class Job:
-    id: str
-    label: str
-    status: str = "running"
-    result: Any = None
-    error: str | None = None
-    started_at: float = field(default_factory=time.time)
-    finished_at: float | None = None
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "label": self.label,
-            "status": self.status,
-            "result": self.result,
-            "error": self.error,
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-        }
-
-
-class JobManager:
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._jobs: collections.OrderedDict[str, Job] = collections.OrderedDict()
-
-    def submit(self, label: str, work: Any) -> Job:
-        job = Job(id=secrets.token_hex(8), label=label)
-        with self._lock:
-            self._jobs[job.id] = job
-            while len(self._jobs) > 50:
-                self._jobs.popitem(last=False)
-        thread = threading.Thread(
-            target=self._run,
-            args=(job, work),
-            name=f"control-{job.id}",
-            daemon=True,
-        )
-        thread.start()
-        return job
-
-    def _run(self, job: Job, work: Any) -> None:
-        try:
-            job.result = work()
-        except Exception as exc:  # noqa: BLE001 - 任务失败必须回给页面
-            job.error = f"{type(exc).__name__}: {exc}"
-            job.status = "failed"
-        else:
-            job.status = "succeeded"
-        finally:
-            job.finished_at = time.time()
-
-    def get(self, job_id: str) -> Job | None:
-        with self._lock:
-            return self._jobs.get(job_id)
-
-    def recent(self) -> list[dict[str, Any]]:
-        with self._lock:
-            return [job.as_dict() for job in reversed(self._jobs.values())][:20]
 
 
 class _Httpd(ThreadingHTTPServer):
@@ -157,7 +95,18 @@ class _Handler(BaseHTTPRequestHandler):
     def _auth(self) -> bool:
         return self._host_ok() and self._cookie_ok()
 
-    # ── GET ───────────────────────────────────────────────────────────
+    # ── 路由 ──────────────────────────────────────────────────────────
+    def _dispatch(self, method, path, query, payload):
+        for route in ROUTES:
+            if route.method != method:
+                continue
+            match = route.pattern.fullmatch(path)
+            if match is None:
+                continue
+            getattr(self, route.handler)(match.groupdict(), query, payload or {})
+            return
+        self._json(404, {"error": "not found"})
+
     def do_GET(self) -> None:  # noqa: N802 - http.server 接口
         parsed = urlsplit(self.path)
         path = parsed.path
@@ -174,78 +123,193 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(401, _LOGIN_PAGE.encode(), "text/html; charset=utf-8")
             return
         try:
-            if path in {"/", "/index.html"}:
-                self._static("index.html", "text/html; charset=utf-8")
-            elif path == "/app.js":
-                self._static("app.js", "text/javascript; charset=utf-8")
-            elif path == "/styles.css":
-                self._static("styles.css", "text/css; charset=utf-8")
-            elif path == "/favicon.ico":
-                self._send(204, b"", "image/x-icon")
-            elif path == "/api/meta":
-                self._meta()
-            elif path == "/api/services":
-                self._json(200, {"services": self.server.control.backend.services()})
-            elif path.startswith("/api/services/") and path.endswith("/logs"):
-                service_id = unquote(path[len("/api/services/") : -len("/logs")].strip("/"))
-                tail = _int(parse_qs(parsed.query).get("tail", ["200"])[0], 200)
-                self._json(200, self.server.control.backend.logs(service_id, tail=tail))
-            elif path.startswith("/api/services/"):
-                service_id = unquote(path.removeprefix("/api/services/").strip("/"))
-                self._json(200, self.server.control.backend.service(service_id))
-            elif path == "/api/jobs":
-                self._json(200, {"jobs": self.server.control.jobs.recent()})
-            elif path.startswith("/api/jobs/"):
-                job = self.server.control.jobs.get(path.removeprefix("/api/jobs/"))
-                if job is None:
-                    self._json(404, {"error": "任务不存在"})
-                else:
-                    self._json(200, job.as_dict())
-            elif path == "/api/doctor":
-                query = parse_qs(parsed.query)
-                services = query.get("service", [None])[0]
-                wanted = [item for item in (services or "").split(",") if item] or None
-                self._json(200, {"rows": self.server.control.backend.doctor(wanted)})
-            elif path == "/api/config":
-                self._json(200, self.server.control.backend.config())
-            elif path == "/api/jupyter/kernels":
-                self._json(200, {"kernels": self.server.control.backend.kernels()})
-            elif path.startswith("/api/jupyter/kernels/"):
-                name = unquote(path.removeprefix("/api/jupyter/kernels/").strip("/"))
-                kernels = self.server.control.backend.kernels()
-                found = next((row for row in kernels if row.get("name") == name), None)
-                if found is None:
-                    self._json(404, {"error": f"内核不存在：{name}"})
-                else:
-                    self._json(200, found)
-            elif path == "/api/jupyter/workdirs":
-                self._json(200, self.server.control.backend.workdirs())
-            elif path == "/api/updates":
-                query = parse_qs(parsed.query)
-                profile = query.get("profile", ["web"])[0]
-                timeout = _float(query.get("timeout", [str(dsh_updates.DEFAULT_TIMEOUT)])[0])
-                refresh = query.get("refresh", ["0"])[0] == "1"
-                self._json(
-                    200,
-                    self.server.control.backend.updates(
-                        refresh=refresh,
-                        profile=profile,
-                        timeout=timeout,
-                    ),
-                )
-            elif path == "/api/upgrade-job":
-                self._json(200, self.server.control.backend.upgrade_job())
-            elif path == "/api/fs":
-                query = parse_qs(parsed.query)
-                value = query.get("path", [""])[0]
-                include_files = query.get("files", ["0"])[0] == "1"
-                self._json(200, self.server.control.backend.list_dir(value, include_files=include_files))
-            elif path == "/api/about":
-                self._json(200, self.server.control.backend.about())
-            else:
-                self._json(404, {"error": "not found"})
+            self._dispatch("GET", path, parse_qs(parsed.query), None)
         except Exception as exc:  # noqa: BLE001 - API 必须把具体失败显示在页面
             self._error(exc)
+
+    # ── GET handler ───────────────────────────────────────────────────
+    def _index(self, match, query, payload):
+        self._static("index.html", "text/html; charset=utf-8")
+
+    def _app_js(self, match, query, payload):
+        self._static("app.js", "text/javascript; charset=utf-8")
+
+    def _core_js(self, match, query, payload):
+        self._static("core.js", "text/javascript; charset=utf-8")
+
+    def _page_js(self, match, query, payload):
+        self._static(f"pages/{unquote(match['name'])}", "text/javascript; charset=utf-8")
+
+    def _styles(self, match, query, payload):
+        self._static("styles.css", "text/css; charset=utf-8")
+
+    def _favicon(self, match, query, payload):
+        self._send(204, b"", "image/x-icon")
+
+    def _meta_route(self, match, query, payload):
+        self._meta()
+
+    def _services(self, match, query, payload):
+        self._json(200, {"services": self.server.control.backend.services()})
+
+    def _service_logs(self, match, query, payload):
+        service_id = unquote(match["service"])
+        tail = _int(query.get("tail", ["200"])[0], 200)
+        self._json(200, self.server.control.backend.logs(service_id, tail=tail))
+
+    def _service(self, match, query, payload):
+        service_id = unquote(match["service"])
+        self._json(200, self.server.control.backend.service(service_id))
+
+    def _jobs(self, match, query, payload):
+        self._json(200, {"jobs": self.server.control.jobs.recent()})
+
+    def _job(self, match, query, payload):
+        job = self.server.control.jobs.get(match["job_id"])
+        if job is None:
+            self._json(404, {"error": "任务不存在"})
+        else:
+            self._json(200, job.as_dict())
+
+    def _doctor_get(self, match, query, payload):
+        services = query.get("service", [None])[0]
+        wanted = [item for item in (services or "").split(",") if item] or None
+        self._json(200, self.server.control.backend.doctor(wanted))
+
+    def _config_get(self, match, query, payload):
+        self._json(200, self.server.control.backend.config())
+
+    def _kernels(self, match, query, payload):
+        self._json(200, {"kernels": self.server.control.backend.kernels()})
+
+    def _kernel(self, match, query, payload):
+        name = unquote(match["name"])
+        kernels = self.server.control.backend.kernels()
+        found = next((row for row in kernels if row.get("name") == name), None)
+        if found is None:
+            self._json(404, {"error": f"内核不存在：{name}"})
+        else:
+            self._json(200, found)
+
+    def _workdirs(self, match, query, payload):
+        self._json(200, self.server.control.backend.workdirs())
+
+    def _updates_get(self, match, query, payload):
+        profile = query.get("profile", ["web"])[0]
+        timeout = _float(query.get("timeout", [str(dsh_updates.DEFAULT_TIMEOUT)])[0])
+        refresh = query.get("refresh", ["0"])[0] == "1"
+        self._json(
+            200,
+            self.server.control.backend.updates(refresh=refresh, profile=profile, timeout=timeout),
+        )
+
+    def _upgrade_job(self, match, query, payload):
+        self._json(200, self.server.control.backend.upgrade_job())
+
+    def _fs(self, match, query, payload):
+        value = query.get("path", [""])[0]
+        include_files = query.get("files", ["0"])[0] == "1"
+        self._json(200, self.server.control.backend.list_dir(value, include_files=include_files))
+
+    def _about(self, match, query, payload):
+        self._json(200, self.server.control.backend.about())
+
+    # ── POST/PUT/PATCH/DELETE handler ─────────────────────────────────
+    def _actions_post(self, match, query, payload):
+        self._action(payload)
+
+    def _quit_post(self, match, query, payload):
+        self._quit(payload)
+
+    def _doctor_post(self, match, query, payload):
+        services = payload.get("services")
+        if services is not None and not isinstance(services, list):
+            raise ControlError("services 必须是字符串数组")
+        wanted = [str(item) for item in services] if services else None
+        job = self.server.control.jobs.submit("诊断", lambda: self.server.control.backend.doctor(wanted))
+        self._json(202, job.as_dict())
+
+    def _updates_post(self, match, query, payload):
+        profile = str(payload.get("profile") or "web")
+        timeout = _float(payload.get("timeout") or dsh_updates.DEFAULT_TIMEOUT)
+        refresh = bool(payload.get("refresh"))
+        job = self.server.control.jobs.submit(
+            "检查更新",
+            lambda: self.server.control.backend.updates(refresh=refresh, profile=profile, timeout=timeout),
+        )
+        self._json(202, job.as_dict())
+
+    def _config_post(self, match, query, payload):
+        raw = payload.get("raw")
+        if not isinstance(raw, str):
+            raise ControlError("raw 必须是字符串")
+        self._json(200, self.server.control.backend.save_config_raw(raw))
+
+    def _config_value_put(self, match, query, payload):
+        key = str(payload.get("key") or query.get("key", [""])[0])
+        if not key:
+            raise ControlError("缺少配置键")
+        if "value" not in payload:
+            raise ControlError("缺少 value")
+        self._json(200, self.server.control.backend.set_config_value(key, payload["value"]))
+
+    def _config_value_delete(self, match, query, payload):
+        key = str(payload.get("key") or query.get("key", [""])[0])
+        if not key:
+            raise ControlError("缺少配置键")
+        self._json(200, self.server.control.backend.unset_config_value(key))
+
+    def _kernels_post(self, match, query, payload):
+        self._json(200, self.server.control.backend.add_kernel(payload))
+
+    def _kernel_use(self, match, query, payload):
+        self._json(200, self.server.control.backend.use_kernel(unquote(match["name"])))
+
+    def _kernel_patch(self, match, query, payload):
+        display_name = str(payload.get("display_name") or "")
+        if not display_name:
+            raise ControlError("display_name 不能为空")
+        self._json(
+            200,
+            self.server.control.backend.rename_kernel(unquote(match["name"]), display_name),
+        )
+
+    def _kernel_delete(self, match, query, payload):
+        force = str(payload.get("force", query.get("force", ["0"])[0])).lower() in {"1", "true"}
+        self._json(
+            200,
+            self.server.control.backend.remove_kernel(unquote(match["name"]), force=force),
+        )
+
+    def _workdirs_post(self, match, query, payload):
+        self._json(
+            200,
+            self.server.control.backend.use_workdir(
+                str(payload.get("path") or ""),
+                str(payload["kernel"]) if payload.get("kernel") else None,
+            ),
+        )
+
+    def _upgrades_post(self, match, query, payload):
+        targets = payload.get("targets")
+        if not isinstance(targets, list) or not all(isinstance(item, str) for item in targets):
+            raise ControlError("targets 必须是字符串数组")
+        profile = str(payload.get("profile") or "web")
+        timeout = _float(payload.get("timeout") or dsh_updates.DEFAULT_TIMEOUT)
+        self._json(202, self.server.control.backend.upgrade(targets, profile=profile, timeout=timeout))
+
+    def _install_post(self, match, query, payload):
+        services = payload.get("services")
+        if services is not None and not isinstance(services, list):
+            raise ControlError("services 必须是字符串数组")
+        icon = payload.get("icon")
+        self._json(
+            200,
+            self.server.control.backend.install(services=services, icon=str(icon) if icon else None),
+        )
+
+    def _uninstall_post(self, match, query, payload):
+        self._json(200, self.server.control.backend.uninstall())
 
     def _boot(self, token: str) -> None:
         target = self.server.control.consume_boot(token)
@@ -261,9 +325,11 @@ class _Handler(BaseHTTPRequestHandler):
         )
 
     def _static(self, name: str, content_type: str) -> None:
-        path = STATIC / name
         try:
-            body = path.read_bytes()
+            body = read_static(name)
+        except StaticAssetError:
+            self._json(404, {"error": "not found"})
+            return
         except OSError:
             self._json(500, {"error": f"缺少前端资源：{name}"})
             return
@@ -302,77 +368,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(403, {"error": "forbidden request"})
             return
         parsed = urlsplit(self.path)
-        path = parsed.path
-        query = parse_qs(parsed.query)
         try:
             payload = self._body()
-            if path == "/api/actions":
-                self._action(payload)
-            elif path == "/api/agent/quit":
-                self._quit(payload)
-            elif path == "/api/config":
-                raw = payload.get("raw")
-                if not isinstance(raw, str):
-                    raise ControlError("raw 必须是字符串")
-                self._json(200, self.server.control.backend.save_config_raw(raw))
-            elif path == "/api/config/value":
-                key = str(payload.get("key") or query.get("key", [""])[0])
-                if not key:
-                    raise ControlError("缺少配置键")
-                if method == "DELETE":
-                    self._json(200, self.server.control.backend.unset_config_value(key))
-                else:
-                    if "value" not in payload:
-                        raise ControlError("缺少 value")
-                    self._json(200, self.server.control.backend.set_config_value(key, payload["value"]))
-            elif path == "/api/jupyter/kernels" and method == "POST":
-                self._json(200, self.server.control.backend.add_kernel(payload))
-            elif path.startswith("/api/jupyter/kernels/") and path.endswith("/use"):
-                name = unquote(path.removeprefix("/api/jupyter/kernels/")[: -len("/use")].strip("/"))
-                self._json(200, self.server.control.backend.use_kernel(name))
-            elif path.startswith("/api/jupyter/kernels/") and method == "PATCH":
-                name = unquote(path.removeprefix("/api/jupyter/kernels/").strip("/"))
-                display_name = str(payload.get("display_name") or "")
-                if not display_name:
-                    raise ControlError("display_name 不能为空")
-                self._json(200, self.server.control.backend.rename_kernel(name, display_name))
-            elif path.startswith("/api/jupyter/kernels/") and method == "DELETE":
-                name = unquote(path.removeprefix("/api/jupyter/kernels/").strip("/"))
-                force = str(payload.get("force", query.get("force", ["0"])[0])).lower() in {"1", "true"}
-                self._json(200, self.server.control.backend.remove_kernel(name, force=force))
-            elif path == "/api/jupyter/workdirs" and method == "POST":
-                self._json(
-                    200,
-                    self.server.control.backend.use_workdir(
-                        str(payload.get("path") or ""),
-                        str(payload["kernel"]) if payload.get("kernel") else None,
-                    ),
-                )
-            elif path == "/api/upgrades" and method == "POST":
-                targets = payload.get("targets")
-                if not isinstance(targets, list) or not all(isinstance(item, str) for item in targets):
-                    raise ControlError("targets 必须是字符串数组")
-                profile = str(payload.get("profile") or "web")
-                timeout = _float(payload.get("timeout") or dsh_updates.DEFAULT_TIMEOUT)
-                self._json(
-                    202, self.server.control.backend.upgrade(targets, profile=profile, timeout=timeout)
-                )
-            elif path == "/api/install" and method == "POST":
-                services = payload.get("services")
-                if services is not None and not isinstance(services, list):
-                    raise ControlError("services 必须是字符串数组")
-                icon = payload.get("icon")
-                self._json(
-                    200,
-                    self.server.control.backend.install(
-                        services=services,
-                        icon=str(icon) if icon else None,
-                    ),
-                )
-            elif path == "/api/uninstall" and method == "POST":
-                self._json(200, self.server.control.backend.uninstall())
-            else:
-                self._json(404, {"error": "not found"})
+            self._dispatch(method, parsed.path, parse_qs(parsed.query), payload)
         except Exception as exc:  # noqa: BLE001
             self._error(exc)
 

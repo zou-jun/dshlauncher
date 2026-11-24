@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.9.0
+
+- 控制台 HTTP 改为 `control/routes.py` 表驱动；GET/POST/PUT/PATCH/DELETE 统一按方法 + 路径模式分发。
+- 新增 `inspector.PortInspector`：一次 `net_connections` 扫描缓存全部监听端口，`Supervisor` 的占用者/进程判定在短 TTL 内复用。
+- 前端总览、服务详情、日志拆成 `pages/overview.js`、`pages/service.js`、`pages/logs.js` 与共享 `pages/status.js`；`app.js` 只保留动作、路由、事件和启动约 200 行。
+- 新增 `scripts/smoke_ui.py`：headless Chromium + CDP 实际执行总览、设置、服务、日志、诊断异步 Job，并检查全部静态 ES modules；支持 `--exe` 测试打包版。`make smoke-ui` 运行。
+- 诊断与更新检查的后台 Job、静态资源路径保护保持。
+- 修复 Jupyter 默认 profile 被公共配置覆盖为 dsh 全局 profile 的回归；Jupyter 继续使用 `services/jupyter/browser/`。
+- Jupyter 只切换工作目录时不再要求先定位 Jupyter Lab 安装。
+
+## 0.8.5
+
+- `control/server.py` 拆出 `jobs.py` 与 `static_assets.py`；后台任务和静态资源路径校验独立维护。
+- 诊断与 dsh 更新检查改为 `JobManager` 后台任务：新增 `POST /api/doctor`、`POST /api/updates`，页面先显示检查中，完成后再渲染。
+- 前端新增 `waitForJob()`；设置/诊断/更新/Jupyter 页面模块保持不变。
+
+## 0.8.4
+
+- 前端拆成 `core.js` + `pages/*.js` ES modules：总览/服务/日志保留入口层，设置、更新、Jupyter、诊断、关于独立；`app.js` 从约 820 行降到约 390 行。
+- 控制台静态路由支持 `/core.js` 与 `/pages/*.js`，并限制解析后的路径必须位于 `webui/static/` 内。
+
+## 0.8.3
+
+- 抽取 `services/common_settings.py`：dsh / Jupyter 共用 host、port、browser、ozone、profile、窗口和超时解析，数据类改为共享基类。
+- `control/backend.py` 拆成门面 + `config_store` / `files` / `jupyter` / `updates` 领域模块；服务动作、配置、文件浏览、Jupyter 与升级任务职责分离。
+
+## 0.8.2
+
+- 将服务动作控制器从 `tray/` 移到 `controller.py`，控制台不再反向依赖托盘；控制器集合改为线程安全的快照注册表。
+- 删除 `ServiceDefinition`，`open_on_start` 等服务元数据统一放在 `ServiceSpec`。
+- 抽取 `services/jupyter/operations.py`，CLI 与控制台共用 Python 解析、内核注册/选择/删除和工作目录切换逻辑；删除两份 `_python_from_dir` 和重复的服务诊断代码。
+- 配置重载整体替换控制器快照，构建失败的服务保留为概要页错误占位，不再从总览静默消失。
+
+## 0.8.1
+
+- 控制台重新分组：左侧栏只保留总览 / 诊断 / 设置 / 关于；dsh 更新与设置、Jupyter 配置与设置作为总览服务卡片入口。
+- 日志改为 Web 日志页：支持行数切换与自动刷新，不再调用外部编辑器打开 `service.log`。
+- 诊断拆分为启动器通用环境与各服务独立卡片；设置拆分为控制台设置与各服务设置。
+- 托盘默认菜单项改为「打开控制台」，双击（或单击）图标直接打开；带 0.6 秒防抖避免双击打开两次。
+- Agent/控制台启动不再自动启动 dsh 或其他服务，服务必须由用户在控制台显式启动。
+
+## 0.8.0
+
+- 新增 `[ui] single_window`（环境变量 `WEBLAUNCHER_SINGLE_WINDOW`）：控制台与所有服务共用一个普通 Chromium 窗口，每个页面一个标签页；首次打开建窗口，后续只追加标签页。
+- 单窗口模式使用共用的 `tabbed-browser/` profile，不再使用每个服务的 `--app` 窗口；控制台的设置页可直接切换，修改后重启 Agent 生效。
+
 ## 0.7.1
 
 - Windows 托管进程改用 `CREATE_NO_WINDOW` 分离标志，修复通过 `jupyter-lab.exe` 启动 Jupyter 时额外出现的终端窗口；Jupyter 日志仍写入 `service.log`。

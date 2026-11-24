@@ -54,6 +54,8 @@ class UiSettings:
     browser: str | None = None
     ozone: str = "auto"
     dedupe: bool = True
+    #: 控制台与所有服务共用同一个浏览器窗口，以普通标签页而不是 --app 窗口打开。
+    single_window: bool = False
     window: WindowSettings = WindowSettings()
 
 
@@ -138,6 +140,10 @@ def load(path: Path | None = None) -> Config:
             browser=str(env("BROWSER") or _legacy(raw, ui_raw, "browser", "") or "") or None,
             ozone=ozone,
             dedupe=env("NO_DEDUPE") is None and flag(_legacy(raw, ui_raw, "dedupe", True), True),
+            single_window=flag(
+                env("SINGLE_WINDOW") or _legacy(raw, ui_raw, "single_window", False),
+                False,
+            ),
             window=window,
         ),
         raw=raw,

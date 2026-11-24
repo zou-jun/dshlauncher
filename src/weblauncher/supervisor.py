@@ -15,7 +15,7 @@ from pathlib import Path
 
 import psutil
 
-from . import logs, platform, ports, process
+from . import inspector, logs, platform, ports, process
 from . import state as state_mod
 from .paths import Paths, ServicePaths, open_append
 from .services.base import LaunchPlan, ServiceAdapter, ServiceSpec
@@ -44,6 +44,7 @@ class Supervisor:
         self.start_timeout = float(getattr(self.settings, "start_timeout", 120.0))
         self._lock_depth = 0
         self._lock: process.ServiceLock | None = None
+        self._inspector = inspector.PortInspector()
 
     @contextlib.contextmanager
     def _locked(self):
@@ -157,17 +158,7 @@ class Supervisor:
 
     def port_owner_process(self, port: int | None = None) -> psutil.Process | None:
         port = int(self.settings.port) if port is None else port
-        try:
-            connections = psutil.net_connections(kind="tcp")
-        except (psutil.Error, OSError):
-            return None
-        for conn in connections:
-            if conn.laddr and conn.laddr.port == port and conn.status == psutil.CONN_LISTEN and conn.pid:
-                try:
-                    return psutil.Process(conn.pid)
-                except psutil.Error:
-                    return None
-        return None
+        return self._inspector.owner_process(port)
 
     def _wait_port_closed(self, port: int, timeout: float = STOP_TIMEOUT) -> None:
         """等到端口真正可 bind：connect 被拒不代表旧 socket 已经释放。"""
@@ -179,21 +170,7 @@ class Supervisor:
 
     def port_owner(self, port: int | None = None) -> str | None:
         port = int(self.settings.port) if port is None else port
-        try:
-            connections = psutil.net_connections(kind="tcp")
-        except (psutil.Error, OSError):
-            return None
-        for conn in connections:
-            if conn.laddr and conn.laddr.port == port and conn.status == psutil.CONN_LISTEN:
-                pid = conn.pid
-                if pid is None:
-                    return f"未知进程（监听 {port}）"
-                try:
-                    proc = psutil.Process(pid)
-                    return f"pid {pid} {proc.name()} :: {' '.join(proc.cmdline())[:200]}"
-                except psutil.Error:
-                    return f"pid {pid}"
-        return None
+        return self._inspector.owner(port)
 
     # ── 生命周期 ──────────────────────────────────────────────────────
     def _reuse(self, state: State) -> State:

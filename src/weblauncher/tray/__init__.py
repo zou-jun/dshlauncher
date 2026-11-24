@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .controller import TrayController, state_text, status_text
+from ..controller import state_text, status_text
 from .ipc import (
     INFO_NAME,
     START_WAIT,
@@ -37,7 +37,6 @@ __all__ = [
     "IpcServer",
     "Lock",
     "TrayApp",
-    "TrayController",
     "TrayUnavailable",
     "_clear_info",
     "_read_info",

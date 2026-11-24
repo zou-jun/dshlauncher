@@ -1,141 +1,67 @@
-"""Web 控制台的业务后端：把 CLI 动作整理成可被 HTTP 调用的数据结构。"""
+"""Web 控制台业务门面：服务视图/动作 + 配置、Jupyter、更新、安装等子服务。"""
 
 from __future__ import annotations
 
 import contextlib
-import datetime as dt
-import os
 import sys
 import threading
-import time
-import tomllib
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .. import __version__, doctor, install, logs, memory
 from .. import config as config_mod
-from .. import paths as paths_mod
-from ..context import Runtime, ServiceContext
+from ..context import Runtime
+from ..controller import ServiceController, ServiceControllerRegistry
 from ..services import registry
-from ..services.dsh import updates as dsh_updates
-from ..services.dsh.upgrade import BusyError, UpgradeError, UpgradeManager
-from ..services.jupyter import kernels as jupyter_kernels
-from ..services.jupyter import workdirs as jupyter_workdirs
+from ..services.dsh.upgrade import BusyError
 from ..status import ServiceStatus
-from ..tray.controller import TrayController
-
-
-class ControlError(RuntimeError):
-    """带 HTTP 状态码的业务错误。"""
-
-    def __init__(self, message: str, *, status: int = 400) -> None:
-        super().__init__(message)
-        self.status = status
-
-
-CONFIG_FIELDS: tuple[dict[str, Any], ...] = (
-    {
-        "key": "launcher.start_timeout",
-        "label": "启动超时（秒）",
-        "type": "number",
-        "section": "launcher",
-        "help": "等待服务就绪的最长时间",
-    },
-    {
-        "key": "launcher.tray_exit_stops_services",
-        "label": "退出时停止服务",
-        "type": "boolean",
-        "section": "launcher",
-        "help": "Ctrl+C / 退出控制台时是否停止托管服务",
-    },
-    {
-        "key": "ui.browser",
-        "label": "浏览器",
-        "type": "string",
-        "section": "ui",
-        "help": "chrome / edge / chromium / brave 或路径",
-    },
-    {
-        "key": "ui.ozone",
-        "label": "Linux 显示后端",
-        "type": "select",
-        "section": "ui",
-        "choices": list(config_mod.OZONE_MODES),
-    },
-    {"key": "ui.dedupe", "label": "浏览器窗口去重", "type": "boolean", "section": "ui"},
-    {"key": "ui.window.width_ratio", "label": "窗口宽度比例", "type": "number", "section": "ui.window"},
-    {"key": "ui.window.height_ratio", "label": "窗口高度比例", "type": "number", "section": "ui.window"},
-    {"key": "ui.window.min_width", "label": "最小宽度", "type": "number", "section": "ui.window"},
-    {"key": "ui.window.min_height", "label": "最小高度", "type": "number", "section": "ui.window"},
-    {"key": "dsh.host", "label": "dsh 绑定地址", "type": "string", "section": "dsh"},
-    {"key": "dsh.port", "label": "dsh 端口", "type": "number", "section": "dsh"},
-    {"key": "dsh.work_dir", "label": "dsh 工作目录", "type": "path", "section": "dsh"},
-    {"key": "dsh.node", "label": "node 路径", "type": "path", "section": "dsh"},
-    {"key": "dsh.dsh_bin", "label": "dsh bin.js 路径", "type": "path", "section": "dsh"},
-    {"key": "dsh.profile_dir", "label": "dsh 浏览器 profile", "type": "path", "section": "dsh"},
-    {"key": "dsh.start_timeout", "label": "dsh 启动超时", "type": "number", "section": "dsh"},
-    {"key": "jupyter.host", "label": "Jupyter 绑定地址", "type": "string", "section": "jupyter"},
-    {"key": "jupyter.port", "label": "Jupyter 端口", "type": "number", "section": "jupyter"},
-    {"key": "jupyter.root_dir", "label": "Jupyter 工作目录", "type": "path", "section": "jupyter"},
-    {"key": "jupyter.jupyter_bin", "label": "jupyter-lab 路径", "type": "path", "section": "jupyter"},
-    {"key": "jupyter.profile_dir", "label": "Jupyter 浏览器 profile", "type": "path", "section": "jupyter"},
-    {"key": "jupyter.start_timeout", "label": "Jupyter 启动超时", "type": "number", "section": "jupyter"},
-    {"key": "jupyter.base_url", "label": "Jupyter base_url", "type": "string", "section": "jupyter"},
-    {"key": "jupyter.kernel", "label": "默认内核", "type": "string", "section": "jupyter"},
-    {
-        "key": "jupyter.remember_per_workdir",
-        "label": "按目录记忆内核",
-        "type": "boolean",
-        "section": "jupyter",
-    },
-)
-
-
-@dataclass(frozen=True)
-class _CachedReport:
-    at: float
-    profile: str
-    timeout: float
-    report: dsh_updates.UpdateReport
+from . import config_store, files
+from .errors import ControlError
+from .jupyter import JupyterService
+from .updates import UpdatesService
 
 
 class ControlBackend:
     """控制台和 CLI 共用的服务动作集合。
 
-    服务动作仍然走 ``TrayController`` / ``Supervisor``；这个类只负责把
-    结果转成 JSON 友好的结构，并保护配置/内存的读取与重载。
+    服务动作仍然走 ``ServiceController`` / ``Supervisor``；这个类只负责
+    组合服务视图与各领域子服务，并保护配置/内存的读取与重载。
     """
 
     def __init__(
         self,
         runtime: Runtime,
-        controllers: dict[str, TrayController],
+        controllers: ServiceControllerRegistry | dict[str, ServiceController],
         *,
         request_quit: Any = None,
     ) -> None:
         self.runtime = runtime
-        self.controllers = controllers
+        self.controllers = (
+            controllers
+            if isinstance(controllers, ServiceControllerRegistry)
+            else ServiceControllerRegistry(controllers)
+        )
         self._request_quit = request_quit
         self._batch_lock = threading.Lock()
         self._config_lock = threading.Lock()
-        self._update_lock = threading.Lock()
-        self._cached_report: _CachedReport | None = None
-        self._upgrade: UpgradeManager | None = None
+        self.jupyter = JupyterService(runtime, reload=self._reload)
+        self.updates_service = UpdatesService(runtime, exclusive_dsh=self._exclusive_dsh)
 
     # ── 服务快照 ──────────────────────────────────────────────────────
-    def _controller(self, service_id: str) -> TrayController:
+    def _controller(self, service_id: str) -> ServiceController:
         controller = self.controllers.get(service_id)
         if controller is None:
-            raise ControlError(f"未知服务：{service_id}", status=404)
+            raise ControlError(
+                self.controllers.errors().get(service_id) or f"未知服务：{service_id}", status=404
+            )
         return controller
 
-    def _busy(self, controller: TrayController) -> bool:
+    def _busy(self, controller: ServiceController) -> bool:
         return controller.busy
 
     def _snapshot(
         self,
-        controller: TrayController,
+        controller: ServiceController,
         *,
         check_ports: bool = False,
         check_owner: bool = False,
@@ -151,15 +77,16 @@ class ControlBackend:
                 "id": context.service_id,
                 "label": context.spec.label,
                 "description": context.spec.description,
+                "links": [{"label": label, "href": href} for label, href in context.spec.console_links],
                 "running": False,
                 "error": f"{type(exc).__name__}: {exc}",
             }
         data = status.as_dict()
         data["id"] = context.service_id
         data["description"] = context.spec.description
-        data["auto_start"] = context.definition.auto_start
-        data["open_on_start"] = context.definition.open_on_start
+        data["open_on_start"] = context.spec.open_on_start
         data["supports_updates"] = context.spec.supports_updates
+        data["links"] = [{"label": label, "href": href} for label, href in context.spec.console_links]
         data["busy"] = self._busy(controller)
         data["status"] = "running" if status.running else "stopped"
         data["url"] = logs.redact(status.url or "") or None
@@ -169,15 +96,36 @@ class ControlBackend:
         return data
 
     def services(self, *, detail: bool = False) -> list[dict[str, Any]]:
-        rows = []
-        for service_id in self.controllers:
-            controller = self.controllers[service_id]
+        snapshot = self.controllers.snapshot()
+        errors = self.controllers.errors()
+        rows = [
+            self._snapshot(controller, check_ports=True, check_owner=detail)
+            for controller in snapshot.values()
+        ]
+        for service_id, error in errors.items():
+            if service_id in snapshot:
+                continue
+            try:
+                spec = registry.spec(service_id)
+            except KeyError:
+                spec = None
             rows.append(
-                self._snapshot(
-                    controller,
-                    check_ports=True,
-                    check_owner=detail,
-                )
+                {
+                    "id": service_id,
+                    "label": spec.label if spec is not None else service_id,
+                    "description": spec.description if spec is not None else "服务配置不可用",
+                    "open_on_start": spec.open_on_start if spec is not None else False,
+                    "supports_updates": spec.supports_updates if spec is not None else False,
+                    "links": (
+                        [{"label": label, "href": href} for label, href in spec.console_links]
+                        if spec is not None
+                        else []
+                    ),
+                    "running": False,
+                    "busy": False,
+                    "status": "error",
+                    "error": error,
+                }
             )
         return rows
 
@@ -186,7 +134,7 @@ class ControlBackend:
         data = self._snapshot(controller, check_ports=True, check_owner=True)
         context = controller.context
         data["doctor"] = [
-            {"name": label, "value": value} for label, value in _service_doctor_rows(self.runtime, context)
+            {"name": label, "value": value} for label, value in doctor.service(self.runtime, service_id)
         ]
         data["settings"] = _public_settings(context.settings)
         return data
@@ -211,8 +159,6 @@ class ControlBackend:
                 return controller.restart()
             if action == "open":
                 return controller.open_window()
-            if action == "open-log":
-                return controller.open_log()
             if action == "open-data":
                 return controller.open_data_dir()
             raise ControlError(f"未知动作：{action}", status=400)
@@ -241,7 +187,7 @@ class ControlBackend:
                     else:
                         stopped = controller.stop()
                         results.append(f"{label}: {'已停止' if stopped else '未运行'}")
-                except Exception as exc:  # noqa: BLE001 - 批量操作逐个汇报
+                except Exception as exc:  # noqa: BLE001 - 一个失败不阻断其余
                     errors.append(f"{label}: {type(exc).__name__}: {exc}")
             if errors:
                 raise ControlError("；".join(errors), status=500)
@@ -261,69 +207,62 @@ class ControlBackend:
 
     # ── 配置 ──────────────────────────────────────────────────────────
     def config(self) -> dict[str, Any]:
-        path = self.runtime.paths.config
-        try:
-            raw = path.read_text("utf-8")
-        except OSError:
-            raw = ""
-        data = config_mod.read_raw(path)
-        values: dict[str, Any] = {}
-        for field in CONFIG_FIELDS:
-            key = str(field["key"])
-            try:
-                value = config_mod.get_value(path, key)
-            except KeyError:
-                value = _effective_config_value(self.runtime, key)
-            values[key] = _jsonable(value)
-        return {
-            "path": str(path),
-            "raw": raw,
-            "parsed": _jsonable(data),
-            "fields": [dict(field) for field in CONFIG_FIELDS],
-            "values": values,
-        }
+        return config_store.snapshot(self.runtime)
 
     def _reload(self) -> None:
         """配置/记忆变更后重建上下文；运行中的服务不受影响。"""
         with self._config_lock:
             self.runtime.config = config_mod.load(self.runtime.paths.config)
             self.runtime.memory = memory.load(self.runtime.paths.memory)
-            self._upgrade = None
-            self._cached_report = None
-            new_controllers: dict[str, TrayController] = {}
+            self.updates_service.reset()
+            new_controllers: dict[str, ServiceController] = {}
+            errors: dict[str, str] = {}
             for service_id in registry.ids():
                 try:
                     context = self.runtime.context(service_id)
-                except Exception:  # noqa: BLE001 - 配置错误留到操作时再报
+                except Exception as exc:  # noqa: BLE001 - 配置错误要显示在总览/诊断里
+                    errors[service_id] = f"{type(exc).__name__}: {exc}"
                     continue
-                new_controllers[service_id] = TrayController(context)
-            self.controllers.clear()
-            self.controllers.update(new_controllers)
+                new_controllers[service_id] = ServiceController(context)
+            self.runtime.errors = errors
+            self.controllers.replace(new_controllers, errors=errors)
 
     def set_config_value(self, key: str, value: Any) -> dict[str, Any]:
-        path = self.runtime.paths.config
-        config_mod.set_value(path, key, value)
+        config_store.set_value(self.runtime.paths.config, key, value)
         self._reload()
         return {"key": key, "value": value, "restart_required": True}
 
     def unset_config_value(self, key: str) -> dict[str, Any]:
-        removed = config_mod.unset_value(self.runtime.paths.config, key)
+        removed = config_store.unset_value(self.runtime.paths.config, key)
         self._reload()
         return {"key": key, "removed": removed, "restart_required": True}
 
     def save_config_raw(self, raw: str) -> dict[str, Any]:
-        try:
-            tomllib.loads(raw)
-        except tomllib.TOMLDecodeError as exc:
-            raise ControlError(f"TOML 校验失败：{exc}") from exc
-        paths_mod.write_atomic(self.runtime.paths.config, raw.rstrip() + "\n")
+        config_store.save_raw(self.runtime.paths.config, raw)
         self._reload()
         return {"saved": True, "restart_required": True}
 
     # ── 诊断 / 安装 / 目录 ────────────────────────────────────────────
-    def doctor(self, service_ids: list[str] | None = None) -> list[dict[str, str]]:
-        wanted = registry.split(",".join(service_ids)) if service_ids else None
-        return [{"name": name, "value": value} for name, value in doctor.report(self.runtime, wanted)]
+    def doctor(self, service_ids: list[str] | None = None) -> dict[str, Any]:
+        wanted = registry.split(",".join(service_ids)) if service_ids else registry.ids()
+        services = []
+        for service_id in wanted:
+            try:
+                label = self.runtime.context(service_id).spec.label
+            except Exception:  # noqa: BLE001 - 配置失败时仍返回该服务的诊断错误行
+                label = service_id
+            rows = doctor.service(self.runtime, service_id)
+            services.append(
+                {
+                    "id": service_id,
+                    "label": label,
+                    "rows": [{"name": name, "value": value} for name, value in rows],
+                }
+            )
+        return {
+            "general": [{"name": name, "value": value} for name, value in doctor.general(self.runtime)],
+            "services": services,
+        }
 
     def install(self, *, services: list[str] | None = None, icon: str | None = None) -> dict[str, Any]:
         if services is None:
@@ -341,170 +280,44 @@ class ControlBackend:
         return {"removed": [str(path) for path in removed]}
 
     def list_dir(self, value: str, *, include_files: bool = False) -> dict[str, Any]:
-        if not value:
-            if os.name == "nt":
-                entries = []
-                for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-                    drive = Path(f"{letter}:\\")
-                    if drive.exists():
-                        entries.append({"name": f"{letter}:\\", "path": str(drive), "dir": True})
-                return {"path": "", "parent": None, "entries": entries}
-            value = str(Path.home())
-        path = Path(value).expanduser()
-        try:
-            resolved = path.resolve()
-        except OSError as exc:
-            raise ControlError(f"无法解析目录：{exc}") from exc
-        if resolved.is_file():
-            resolved = resolved.parent
-        if not resolved.is_dir():
-            raise ControlError(f"目录不存在：{resolved}", status=404)
-        entries: list[dict[str, Any]] = []
-        try:
-            for child in sorted(resolved.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())):
-                try:
-                    if child.is_dir():
-                        entries.append({"name": child.name, "path": str(child), "dir": True})
-                    elif include_files:
-                        entries.append({"name": child.name, "path": str(child), "dir": False})
-                except OSError:
-                    continue
-        except OSError as exc:
-            raise ControlError(f"无法读取目录：{exc}") from exc
-        parent = str(resolved.parent) if resolved.parent != resolved else None
-        return {"path": str(resolved), "parent": parent, "entries": entries}
+        return files.list_dir(value, include_files=include_files)
 
-    # ── Jupyter ───────────────────────────────────────────────────────
-    def _jupyter(self) -> ServiceContext:
-        try:
-            return self.runtime.context("jupyter")
-        except Exception as exc:  # noqa: BLE001 - 缺少 jupyter 时返回可读错误
-            raise ControlError(f"Jupyter 不可用：{type(exc).__name__}: {exc}") from exc
-
+    # ── Jupyter / 更新（领域子服务） ────────────────────────────────────
     def kernels(self) -> list[dict[str, Any]]:
-        context = self._jupyter()
-        install_info = context.adapter.install
-        specs = jupyter_kernels.list_kernels(install_info, self.runtime.memory)
-        default = getattr(context.settings, "kernel", None)
-        rows = []
-        for spec in specs:
-            data = spec.as_dict()
-            data["default"] = spec.name == default
-            rows.append(data)
-        return rows
+        return self.jupyter.kernels()
 
     def add_kernel(self, payload: dict[str, Any]) -> dict[str, Any]:
-        context = self._jupyter()
-        python_value = payload.get("python")
-        directory = payload.get("dir")
-        if directory:
-            python = _python_from_dir(Path(str(directory)).expanduser())
-        elif python_value:
-            python = Path(str(python_value)).expanduser()
-        else:
-            raise ControlError("必须给出解释器路径，或包含 .venv 的项目目录")
-        spec = jupyter_kernels.add_kernel(
-            context.adapter.install,
-            self.runtime.memory,
-            python,
-            name=str(payload.get("name") or "") or None,
-            display_name=str(payload.get("display_name") or "") or None,
-            replace=bool(payload.get("replace")),
-            install_dependency=bool(payload.get("install_ipykernel")),
-        )
-        jupyter_workdirs.set_managed(self.runtime.memory, spec.name, spec.python)
-        memory.save(self.runtime.memory, self.runtime.paths.memory)
-        self._reload()
-        return spec.as_dict()
+        return self.jupyter.add_kernel(payload)
 
     def use_kernel(self, name: str) -> dict[str, Any]:
-        context = self._jupyter()
-        spec = jupyter_kernels.require_found(context.adapter.install, self.runtime.memory, name)
-        if spec.broken:
-            raise ControlError(f"内核 {spec.name} 的解释器不存在：{spec.python}")
-        jupyter_workdirs.remember(self.runtime.memory, Path(context.settings.root_dir), spec.name)
-        memory.save(self.runtime.memory, self.runtime.paths.memory)
-        self._reload()
-        return {"kernel": spec.name, "restart_required": True}
+        return self.jupyter.use_kernel(name)
 
     def rename_kernel(self, name: str, display_name: str) -> dict[str, Any]:
-        context = self._jupyter()
-        spec = jupyter_kernels.require_found(context.adapter.install, self.runtime.memory, name)
-        renamed = jupyter_kernels.rename_kernel(spec, display_name)
-        return renamed.as_dict()
+        return self.jupyter.rename_kernel(name, display_name)
 
     def remove_kernel(self, name: str, *, force: bool = False) -> dict[str, Any]:
-        context = self._jupyter()
-        spec = jupyter_kernels.require_found(context.adapter.install, self.runtime.memory, name)
-        if not spec.managed and not force:
-            raise ControlError("不是启动器注册的内核；确认删除请勾选强制删除")
-        jupyter_kernels.remove_kernel(spec)
-        table = memory.section(self.runtime.memory, "jupyter")
-        if table.get("kernel") == spec.name:
-            memory.set_value(self.runtime.memory, "jupyter", "kernel", None)
-        mapping = table.get("workdir_kernels")
-        if isinstance(mapping, dict):
-            for key, value in list(mapping.items()):
-                if value == spec.name:
-                    mapping.pop(key, None)
-        jupyter_workdirs.set_managed(self.runtime.memory, spec.name, None)
-        memory.save(self.runtime.memory, self.runtime.paths.memory)
-        self._reload()
-        return {"removed": spec.name}
+        return self.jupyter.remove_kernel(name, force=force)
 
     def workdirs(self) -> dict[str, Any]:
-        context = self._jupyter()
-        values = jupyter_workdirs.recent(self.runtime.memory)
-        current = memory.get(self.runtime.memory, "jupyter", "workdir", None)
-        return {
-            "current": str(current) if current else str(context.settings.root_dir),
-            "items": [
-                {"path": str(path), "exists": path.is_dir(), "current": str(path) == str(current)}
-                for path in values
-            ],
-        }
+        return self.jupyter.workdirs()
 
     def use_workdir(self, value: str, kernel: str | None = None) -> dict[str, Any]:
-        context = self._jupyter()
-        workdir = jupyter_workdirs.normalize(value)
-        if kernel:
-            spec = jupyter_kernels.require_found(context.adapter.install, self.runtime.memory, kernel)
-            if spec.broken:
-                raise ControlError(f"内核 {spec.name} 的解释器不存在：{spec.python}")
-        jupyter_workdirs.remember(self.runtime.memory, workdir, kernel)
-        memory.save(self.runtime.memory, self.runtime.paths.memory)
-        self._reload()
-        return {"path": str(workdir), "restart_required": True}
+        return self.jupyter.use_workdir(value, kernel)
 
-    # ── 更新 ──────────────────────────────────────────────────────────
     def updates(
         self,
         *,
         refresh: bool = False,
         profile: str = "web",
-        timeout: float = dsh_updates.DEFAULT_TIMEOUT,
+        timeout: float = 30.0,
     ) -> dict[str, Any]:
-        context = self.runtime.context("dsh")
-        with self._update_lock:
-            cached = self._cached_report
-            fresh = (
-                cached is not None
-                and not refresh
-                and cached.profile == profile
-                and cached.timeout == timeout
-                and time.monotonic() - cached.at < 20.0
-            )
-            report = cached.report if fresh and cached is not None else None
-            if report is None:
-                report = dsh_updates.check(context.settings, profile=profile, timeout=timeout)
-                self._cached_report = _CachedReport(time.monotonic(), profile, timeout, report)
-            return report.as_dict()
+        return self.updates_service.report(refresh=refresh, profile=profile, timeout=timeout)
 
-    def _upgrade_manager(self) -> UpgradeManager:
-        if self._upgrade is None:
-            context = self.runtime.context("dsh")
-            self._upgrade = UpgradeManager(context, exclusive=self._exclusive_dsh)
-        return self._upgrade
+    def upgrade(self, targets: list[str], *, profile: str = "web", timeout: float = 30.0) -> dict[str, Any]:
+        return self.updates_service.upgrade(targets, profile=profile, timeout=timeout)
+
+    def upgrade_job(self) -> dict[str, Any]:
+        return self.updates_service.job()
 
     def _exclusive_dsh(self, work: Any) -> None:
         controller = self._controller("dsh")
@@ -514,30 +327,6 @@ class ControlBackend:
             work()
         finally:
             controller.end()
-
-    def upgrade(
-        self, targets: list[str], *, profile: str = "web", timeout: float = dsh_updates.DEFAULT_TIMEOUT
-    ) -> dict[str, Any]:
-        if not isinstance(targets, list) or not targets or not all(isinstance(item, str) for item in targets):
-            raise ControlError("targets 必须是字符串数组")
-        report = dsh_updates.check(
-            self.runtime.context("dsh").settings,
-            profile=profile,
-            timeout=timeout,
-        )
-        with self._update_lock:
-            self._cached_report = _CachedReport(time.monotonic(), profile, timeout, report)
-        try:
-            return self._upgrade_manager().start(targets, report)
-        except BusyError as exc:
-            raise ControlError(str(exc), status=409) from exc
-        except UpgradeError as exc:
-            raise ControlError(str(exc), status=400) from exc
-
-    def upgrade_job(self) -> dict[str, Any]:
-        manager = self._upgrade_manager()
-        job = manager.job
-        return job.as_dict() if job is not None else {"status": "idle"}
 
     # ── 生命周期 ──────────────────────────────────────────────────────
     def about(self) -> dict[str, Any]:
@@ -559,18 +348,6 @@ class ControlBackend:
         self._request_quit(stop_services=stop_services)
 
 
-def _jsonable(value: Any) -> Any:
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, (dt.datetime, dt.date, dt.time)):
-        return value.isoformat()
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-    return value
-
-
 def _public_settings(settings: Any) -> dict[str, Any]:
     """只暴露 UI 需要的设置，不返回 token。"""
     keys = (
@@ -587,6 +364,7 @@ def _public_settings(settings: Any) -> dict[str, Any]:
         "ozone",
         "start_timeout",
         "dedupe",
+        "single_window",
         "remember_per_workdir",
     )
     result: dict[str, Any] = {}
@@ -597,51 +375,4 @@ def _public_settings(settings: Any) -> dict[str, Any]:
     return result
 
 
-def _service_doctor_rows(runtime: Runtime, context: ServiceContext) -> list[tuple[str, str]]:
-    rows: list[tuple[str, str]] = []
-    try:
-        rows.extend(context.adapter.doctor_rows())
-    except Exception as exc:  # noqa: BLE001
-        rows.append(("依赖", f"不可用: {type(exc).__name__}: {exc}"))
-    status = context.service().status(check_owner=True)
-    rows.append(("服务", "运行中" if status.running else "未运行"))
-    rows.append(("监听", "LISTENING" if status.listening else "closed"))
-    if status.owner:
-        rows.append(("占用者", status.owner))
-    return rows
-
-
-def _effective_config_value(runtime: Runtime, key: str) -> Any:
-    """没有显式配置项时给 UI 一个有效默认值。"""
-    parts = key.split(".")
-    if parts[0] == "launcher":
-        return getattr(runtime.config.launcher, ".".join(parts[1:]), None)
-    if parts[0] == "ui":
-        if parts[1:2] == ["window"]:
-            return getattr(runtime.config.ui.window, ".".join(parts[2:]), None)
-        return getattr(runtime.config.ui, parts[1], None)
-    try:
-        context = runtime.context(parts[0])
-    except Exception:
-        return None
-    return getattr(context.settings, ".".join(parts[1:]), None)
-
-
-def _python_from_dir(directory: Path) -> Path:
-    if directory.is_file():
-        return directory
-    if not directory.is_dir():
-        raise ControlError(f"目录不存在：{directory}")
-    candidates = (
-        directory / ".venv" / "Scripts" / "python.exe",
-        directory / ".venv" / "bin" / "python",
-        directory / "venv" / "Scripts" / "python.exe",
-        directory / "venv" / "bin" / "python",
-    )
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    raise ControlError(f"{directory} 下没有找到 .venv/Scripts/python.exe 或 .venv/bin/python")
-
-
-__all__ = ["CONFIG_FIELDS", "ControlBackend", "ControlError"]
+__all__ = ["ControlBackend", "ControlError"]

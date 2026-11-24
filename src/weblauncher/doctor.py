@@ -20,7 +20,8 @@ def _session_text() -> str:
 
 
 def _window_control_text(backend, ozone: str) -> str:  # noqa: ANN001 - 平台后端模块
-    if backend.supports_window_control(ozone):
+    supports = getattr(backend, "supports_window_control", None)
+    if callable(supports) and supports(ozone):
         return "可用（可枚举 / 置前 / 纠正尺寸）"
     if sys.platform.startswith("linux"):
         return "不可用（原生 Wayland；用 --ozone x11 可启用置前与尺寸纠正）"
@@ -61,11 +62,9 @@ def _port_text(controller, settings) -> str:  # noqa: ANN001
     return f"{text}  → 自动改用 {settings.host}:{planned}（{suffix}）"
 
 
-def report(
-    runtime: Runtime,
-    service_ids: tuple[str, ...] | list[str] | None = None,
-) -> list[tuple[str, str]]:
-    rows: list[tuple[str, str]] = [
+def general(runtime: Runtime) -> list[tuple[str, str]]:
+    """启动器自身的环境诊断，不含任何服务。"""
+    return [
         ("启动器", f"{__version__}  ({'frozen' if getattr(sys, 'frozen', False) else 'source'})"),
         ("平台", f"{sys.platform} / backend {getattr(runtime.backend, '__name__', '?').rsplit('.', 1)[-1]}"),
         ("会话", _session_text()),
@@ -85,39 +84,55 @@ def report(
         ),
         ("浏览器", _browser_text(runtime)),
     ]
+
+
+def service(runtime: Runtime, service_id: str) -> list[tuple[str, str]]:
+    """单个服务的诊断行，不含启动器通用行。"""
+    try:
+        context = runtime.context(service_id)
+    except Exception as exc:  # noqa: BLE001 - 单个服务配置失败不能拖垮整张表
+        return [("配置", f"不可用: {exc}")]
+    controller = context.service()
+    settings = context.settings
+    rows: list[tuple[str, str]] = []
+
+    def add(label: str, value: str) -> None:
+        rows.append((label, value))
+
+    add("端口", _port_text(controller, settings))
+    try:
+        adapter_rows = context.adapter.doctor_rows()
+    except Exception as exc:  # noqa: BLE001 - 依赖缺失时仍展示其余诊断
+        add("依赖", f"不可用: {exc}")
+    else:
+        for label, value in adapter_rows:
+            add(label, value)
+    snapshot = controller.status(check_owner=True)
+    pid_text = snapshot.pid if snapshot.pid is not None else "-"
+    add("服务", f"{'运行中' if snapshot.running else '未运行'}, pid={pid_text}")
+    add("监听", "LISTENING" if snapshot.listening else "closed")
+    if not snapshot.running and snapshot.listening:
+        add("占用者", snapshot.owner or "未知")
+    add(
+        "状态文件",
+        f"{context.paths.service(service_id).state}  ({'有' if controller.read_state() else '无'})",
+    )
+    add("日志", str(context.paths.service(service_id).log))
+    return rows
+
+
+def report(
+    runtime: Runtime,
+    service_ids: tuple[str, ...] | list[str] | None = None,
+) -> list[tuple[str, str]]:
+    """CLI 使用的扁平表：通用行 + ``<服务> · <项目>``。"""
     from .services import registry
 
+    rows = general(runtime)
     wanted = tuple(service_ids) if service_ids is not None else registry.ids()
     for service_id in wanted:
-        try:
-            context = runtime.context(service_id)
-        except Exception as exc:  # noqa: BLE001 - 单个服务配置失败不能拖垮整张表
-            rows.append((f"{service_id} · 配置", f"不可用: {exc}"))
-            continue
-        prefix = context.spec.id
-        controller = context.service()
-        settings = context.settings
-        rows.append((f"{prefix} · 端口", _port_text(controller, settings)))
-        try:
-            adapter_rows = context.adapter.doctor_rows()
-        except Exception as exc:  # noqa: BLE001 - 依赖缺失时仍展示其余诊断
-            rows.append((f"{prefix} · 依赖", f"不可用: {exc}"))
-        else:
-            for label, value in adapter_rows:
-                rows.append((f"{prefix} · {label}", value))
-        snapshot = controller.status(check_owner=True)
-        pid_text = snapshot.pid if snapshot.pid is not None else "-"
-        rows.append((f"{prefix} · 服务", f"{'运行中' if snapshot.running else '未运行'}, pid={pid_text}"))
-        rows.append((f"{prefix} · 监听", "LISTENING" if snapshot.listening else "closed"))
-        if not snapshot.running and snapshot.listening:
-            rows.append((f"{prefix} · 占用者", snapshot.owner or "未知"))
-        rows.append(
-            (
-                f"{prefix} · 状态文件",
-                f"{context.paths.service(service_id).state}  ({'有' if controller.read_state() else '无'})",
-            )
-        )
-        rows.append((f"{prefix} · 日志", str(context.paths.service(service_id).log)))
+        for label, value in service(runtime, service_id):
+            rows.append((f"{service_id} · {label}", value))
     return rows
 
 

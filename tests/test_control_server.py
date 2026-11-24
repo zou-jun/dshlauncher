@@ -14,7 +14,7 @@ from weblauncher import paths
 from weblauncher.context import Runtime
 from weblauncher.control.backend import ControlBackend, ControlError
 from weblauncher.control.server import ControlServer
-from weblauncher.tray.controller import TrayController
+from weblauncher.controller import ServiceController, ServiceControllerRegistry
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -25,7 +25,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 @pytest.fixture
 def console(tmp_path: Path):
     runtime = Runtime.create(paths_=paths.Paths(tmp_path), backend=SimpleNamespace(), migrate=False)
-    controllers = {context.service_id: TrayController(context) for context in runtime.contexts()}
+    controllers = {context.service_id: ServiceController(context) for context in runtime.contexts()}
     backend = ControlBackend(runtime, controllers)
     server = ControlServer(backend)
     server.start()
@@ -100,6 +100,111 @@ def test_static_and_service_api(console) -> None:
     assert all("token=" not in (item.get("url") or "") for item in payload["services"])
 
 
+def test_doctor_splits_general_and_services(console) -> None:
+    server, cookie, _ = console
+    status, payload = _call(server, cookie, "/api/doctor")
+    assert status == 200
+    assert {"启动器", "Python"} <= {row["name"] for row in payload["general"]}
+    assert {item["id"] for item in payload["services"]} == {"dsh", "jupyter"}
+    assert all(
+        not row["name"].startswith(("dsh ·", "jupyter ·"))
+        for item in payload["services"]
+        for row in item["rows"]
+    )
+
+
+def test_service_cards_expose_custom_links(console) -> None:
+    server, cookie, _ = console
+    status, payload = _call(server, cookie, "/api/services")
+    assert status == 200
+    links = {
+        item["id"]: {(link["label"], link["href"]) for link in item["links"]} for item in payload["services"]
+    }
+    assert ("dsh 更新", "/#/updates") in links["dsh"]
+    assert ("dsh 设置", "/#/settings/dsh") in links["dsh"]
+    assert ("Jupyter 配置", "/#/jupyter") in links["jupyter"]
+    assert ("Jupyter 设置", "/#/settings/jupyter") in links["jupyter"]
+
+
+def test_unavailable_service_stays_in_overview(tmp_path: Path) -> None:
+    runtime = Runtime.create(paths_=paths.Paths(tmp_path), backend=SimpleNamespace(), migrate=False)
+    context = runtime.context("dsh")
+    registry = ServiceControllerRegistry(
+        {"dsh": ServiceController(context)},
+        errors={"jupyter": "RuntimeError: jupyter 配置无效"},
+    )
+    rows = ControlBackend(runtime, registry).services()
+    by_id = {row["id"]: row for row in rows}
+    assert set(by_id) == {"dsh", "jupyter"}
+    assert by_id["jupyter"]["status"] == "error"
+    assert by_id["jupyter"]["label"] == "Jupyter Lab"
+    assert by_id["jupyter"]["links"]
+    assert "配置无效" in by_id["jupyter"]["error"]
+
+
+def test_reload_preserves_unavailable_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from weblauncher.services import registry as service_registry
+
+    runtime = Runtime.create(paths_=paths.Paths(tmp_path), backend=SimpleNamespace(), migrate=False)
+    controllers = {context.service_id: ServiceController(context) for context in runtime.contexts()}
+    backend = ControlBackend(runtime, controllers)
+    real_build = service_registry.build
+
+    def build(runtime_, service_id, *, cli=None):  # noqa: ANN001, ANN202
+        if service_id == "jupyter":
+            raise RuntimeError("jupyter 配置无效")
+        return real_build(runtime_, service_id, cli=cli)
+
+    monkeypatch.setattr(service_registry, "build", build)
+    backend._reload()
+    assert backend.controllers.get("jupyter") is None
+    assert "配置无效" in backend.controllers.errors()["jupyter"]
+    assert {row["id"] for row in backend.services()} == {"dsh", "jupyter"}
+
+
+def test_split_js_modules_are_served(console) -> None:
+    server, cookie, _ = console
+    for path in ("/core.js", "/pages/settings.js", "/pages/jupyter.js"):
+        request = urllib.request.Request(
+            server.base_url + path,
+            headers={"Cookie": cookie, "Host": f"127.0.0.1:{server.port}"},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            body = response.read()
+        assert response.status == 200
+        assert body
+
+
+def test_async_diagnostic_and_update_jobs(console, monkeypatch: pytest.MonkeyPatch) -> None:
+    server, cookie, _ = console
+    backend = server.backend
+    monkeypatch.setattr(backend, "doctor", lambda services=None: {"general": [], "services": []})
+    monkeypatch.setattr(backend, "updates", lambda **kwargs: {"checked_at": "now"})
+    for path, expected in (
+        ("/api/doctor", {"general": [], "services": []}),
+        ("/api/updates", {"checked_at": "now"}),
+    ):
+        status, payload = _call(server, cookie, path, method="POST", body={})
+        assert status == 202
+        for _ in range(30):
+            status, job = _call(server, cookie, f"/api/jobs/{payload['id']}")
+            if job["status"] != "running":
+                break
+        assert job["status"] == "succeeded"
+        assert job["result"] == expected
+
+
+def test_static_module_path_cannot_escape_root(console) -> None:
+    server, cookie, _ = console
+    request = urllib.request.Request(
+        server.base_url + "/pages/%2e%2e/%2e%2e/app.js",
+        headers={"Cookie": cookie, "Host": f"127.0.0.1:{server.port}"},
+    )
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(request, timeout=10)
+    assert caught.value.code == 404
+
+
 def test_config_round_trip_and_path_serialization(console) -> None:
     server, cookie, _ = console
     status, payload = _call(server, cookie, "/api/config")
@@ -143,7 +248,7 @@ def test_action_returns_job(console, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_quit_calls_backend(tmp_path: Path) -> None:
     runtime = Runtime.create(paths_=paths.Paths(tmp_path), backend=SimpleNamespace(), migrate=False)
-    controllers = {context.service_id: TrayController(context) for context in runtime.contexts()}
+    controllers = {context.service_id: ServiceController(context) for context in runtime.contexts()}
     calls: list[bool] = []
     backend = ControlBackend(
         runtime, controllers, request_quit=lambda **kwargs: calls.append(kwargs["stop_services"])
@@ -177,7 +282,7 @@ def test_quit_calls_backend(tmp_path: Path) -> None:
 def test_backend_rejects_busy_action(tmp_path: Path) -> None:
     runtime = Runtime.create(paths_=paths.Paths(tmp_path), backend=SimpleNamespace(), migrate=False)
     context = runtime.context("dsh")
-    controller = TrayController(context)
+    controller = ServiceController(context)
     backend = ControlBackend(runtime, {"dsh": controller}, request_quit=None)
     controller._busy.acquire()
     try:

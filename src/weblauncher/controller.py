@@ -1,4 +1,4 @@
-"""托盘动作与并发状态；不依赖 pystray，便于单测。"""
+"""服务动作协调器：供 CLI、Web 控制台和托盘共用，不依赖 pystray。"""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from .. import actions
-from ..context import ServiceContext
-from ..supervisor import Supervisor
+from . import actions
+from .context import ServiceContext
+from .supervisor import Supervisor
 
 
 def status_text(service_: Supervisor) -> str:
@@ -22,7 +22,13 @@ def state_text(service_: Supervisor) -> str:
     return service_.status(check_ports=False).short()
 
 
-class TrayController:
+class ServiceController:
+    """单个服务的动作互斥与窗口动作。
+
+    跨进程的 start/stop/restart 互斥由 ``Supervisor`` 的 ``service.lock``
+    负责；这一层只保护当前 Agent 内的动作/UI 状态。
+    """
+
     def __init__(self, context: ServiceContext) -> None:
         self.context = context
         self.settings = context.settings
@@ -90,15 +96,58 @@ class TrayController:
     def describe(self) -> str:
         return self.service.describe()
 
-    def open_log(self) -> str:
-        self.paths.ensure()
-        service_paths = self.paths.service(self.context.service_id)
-        service_paths.ensure()
-        log = service_paths.log
-        log.touch(exist_ok=True)
-        self.context.backend.open_path(log)
-        return f"已打开 {log}"
-
     def open_data_dir(self) -> str:
         self.context.backend.open_path(self.paths.ensure())
         return f"已打开 {self.paths.data}"
+
+
+class ServiceControllerRegistry:
+    """线程安全的服务控制器集合；配置重载时整体替换，不原地清空。"""
+
+    def __init__(
+        self,
+        controllers: dict[str, ServiceController] | None = None,
+        *,
+        errors: dict[str, str] | None = None,
+    ) -> None:
+        self._lock = threading.RLock()
+        self._items: dict[str, ServiceController] = dict(controllers or {})
+        self._errors: dict[str, str] = dict(errors or {})
+
+    def get(self, service_id: str) -> ServiceController | None:
+        with self._lock:
+            return self._items.get(service_id)
+
+    def snapshot(self) -> dict[str, ServiceController]:
+        with self._lock:
+            return dict(self._items)
+
+    def values(self) -> tuple[ServiceController, ...]:
+        with self._lock:
+            return tuple(self._items.values())
+
+    def ids(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(self._items)
+
+    def errors(self) -> dict[str, str]:
+        with self._lock:
+            return dict(self._errors)
+
+    def replace(
+        self,
+        controllers: dict[str, ServiceController],
+        *,
+        errors: dict[str, str] | None = None,
+    ) -> None:
+        with self._lock:
+            self._items = dict(controllers)
+            self._errors = dict(errors or {})
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._items)
+
+    def __contains__(self, service_id: object) -> bool:
+        with self._lock:
+            return service_id in self._items

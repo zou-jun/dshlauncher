@@ -29,6 +29,11 @@ def test_defaults(isolated: Path) -> None:
     assert loaded.start_timeout == 60.0
 
 
+def test_default_profile_is_jupyter_scoped(isolated: Path) -> None:
+    loaded = settings.load()
+    assert loaded.profile_dir == paths.Paths(isolated).service("jupyter").profile
+
+
 def test_config_env_and_cli_precedence(isolated: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (isolated / "config.toml").write_text(
         '[jupyter]\nport = 8890\nroot_dir = "E:/from-config"\n',

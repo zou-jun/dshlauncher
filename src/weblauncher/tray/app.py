@@ -7,6 +7,7 @@ import os
 import secrets
 import sys
 import threading
+import time
 import traceback
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,8 +19,8 @@ from .. import browser, paths
 from ..context import Runtime, ServiceContext
 from ..control.backend import ControlBackend
 from ..control.server import ControlServer
+from ..controller import ServiceController, ServiceControllerRegistry
 from ..services.dsh.upgrade import BusyError
-from .controller import TrayController
 from .ipc import START_WAIT, IpcServer, TrayUnavailable, _clear_info, _write_info, send_ui
 from .single import acquire_lock, release_lock
 
@@ -55,12 +56,14 @@ def icon_image() -> Any:
 
 
 def console_settings(runtime: Runtime) -> SimpleNamespace:
-    """浏览器打开控制台时使用的独立 profile 与窗口参数。"""
+    """浏览器打开控制台时使用的 profile 与窗口参数。"""
+    single = bool(runtime.config.ui.single_window)
     return SimpleNamespace(
         browser=runtime.config.ui.browser,
         ozone=runtime.config.ui.ozone,
         dedupe=True,
-        profile_dir=runtime.paths.control_profile,
+        single_window=single,
+        profile_dir=runtime.paths.tabbed_profile if single else runtime.paths.control_profile,
         window_kwargs=runtime.config.ui.window.kwargs,
     )
 
@@ -85,10 +88,11 @@ class TrayApp:
         open_console: bool = True,
     ) -> None:
         self.runtime = runtime
-        self.contexts = contexts if contexts is not None else runtime.contexts()
-        self.controllers: dict[str, TrayController] = {
-            context.service_id: TrayController(context) for context in self.contexts
-        }
+        loaded = contexts if contexts is not None else runtime.contexts()
+        self.controllers = ServiceControllerRegistry(
+            {context.service_id: ServiceController(context) for context in loaded},
+            errors=dict(runtime.errors),
+        )
         self.target = target
         self.open_console = open_console
         self.icon: Any = None
@@ -100,6 +104,7 @@ class TrayApp:
         self._refresh_lock = threading.Lock()
         self._refresh_timer: threading.Timer | None = None
         self._stopping = threading.Event()
+        self._last_console_open = 0.0
         self._lock: Any = None
 
     # ── 入口 ──────────────────────────────────────────────────────────
@@ -146,7 +151,7 @@ class TrayApp:
         menu_item = pystray.MenuItem
         menu = pystray.Menu
         return menu(
-            menu_item("打开控制台", self._console_action),
+            menu_item("打开控制台", self._console_action, default=True),
             menu.SEPARATOR,
             menu_item("退出（服务继续）", self._quit),
             menu_item("退出并停止全部服务", self._stop_and_quit),
@@ -155,6 +160,11 @@ class TrayApp:
     def _console_action(self, icon: Any = None, item: Any = None) -> None:
         if self._stopping.is_set():
             return
+        now = time.monotonic()
+        # Windows 托盘的双击可能产生两次激活；一次窗口操作足够。
+        if now - self._last_console_open < 0.6:
+            return
+        self._last_console_open = now
         threading.Thread(target=self._open_console_safe, name="console-open", daemon=True).start()
 
     def _open_console_safe(self) -> None:
@@ -178,25 +188,9 @@ class TrayApp:
         threading.Thread(target=self._startup, name="agent-startup", daemon=True).start()
 
     def _startup(self) -> None:
-        # 控制台先出来，服务启动进度在 Web 里展示；不再自动打开服务窗口。
+        # 只打开控制台；服务由用户在控制台里显式启动，Agent 启动不拉起任何服务。
         if self.open_console:
             self._open_console_safe()
-        for context in self.contexts:
-            if not context.definition.auto_start or self._stopping.is_set():
-                continue
-            controller = self.controllers[context.service_id]
-            try:
-
-                def bring_up(ctrl=controller, ctx=context) -> None:
-                    ctrl.start()
-                    state = ctrl.service.read_state()
-                    self.runtime.paths.audit(f"agent 启动 {ctx.service_id}: pid={getattr(state, 'pid', '-')}")
-
-                controller.run_exclusive(bring_up)
-            except Exception as exc:  # noqa: BLE001 - 一个服务起不来不能阻止控制台
-                text = f"{context.spec.label} 启动失败：{type(exc).__name__}: {exc}"
-                self.runtime.paths.audit(text, detail=traceback.format_exc())
-                self._notify(text)
         self._schedule_refresh()
 
     # ── 批量 / IPC ────────────────────────────────────────────────────
@@ -253,11 +247,12 @@ class TrayApp:
 
     def _open_defaults(self) -> str:
         results = []
-        for context in self.contexts:
-            if not context.definition.open_on_start:
+        for controller in self.controllers.values():
+            if not controller.context.spec.open_on_start:
                 continue
-            controller = self.controllers[context.service_id]
-            results.append(f"{context.spec.label}: {controller.run_exclusive(controller.open_window)}")
+            results.append(
+                f"{controller.context.spec.label}: {controller.run_exclusive(controller.open_window)}"
+            )
         return "；".join(results)
 
     # ── 退出 ──────────────────────────────────────────────────────────

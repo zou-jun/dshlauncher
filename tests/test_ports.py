@@ -96,3 +96,26 @@ def test_excluded_ranges_hides_console(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ports.subprocess, "run", fake_run)
     assert ports.excluded_ranges() == ((2987, 3086),)
     assert calls[0]["creationflags"] == ports.CREATE_NO_WINDOW
+
+
+def test_port_inspector_caches_one_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    import psutil
+
+    from weblauncher import inspector
+
+    calls = 0
+
+    def connections(kind: str):  # noqa: ANN202
+        nonlocal calls
+        calls += 1
+        return [SimpleNamespace(laddr=SimpleNamespace(port=18080), status=psutil.CONN_LISTEN, pid=42)]
+
+    proc = SimpleNamespace(name=lambda: "demo", cmdline=lambda: ["demo", "serve"])
+    monkeypatch.setattr(inspector.psutil, "net_connections", connections)
+    monkeypatch.setattr(inspector.psutil, "Process", lambda pid: proc)
+    scan = inspector.PortInspector(ttl=60)
+    assert scan.owner(18080) == "pid 42 demo :: demo serve"
+    assert scan.owner_process(18080) is proc
+    assert calls == 1

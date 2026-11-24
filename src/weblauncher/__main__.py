@@ -17,6 +17,7 @@ from . import __version__, actions, config, doctor, install, logs, memory, paths
 from .context import Runtime, ServiceContext
 from .services import registry
 from .services.jupyter import kernels as jupyter_kernels
+from .services.jupyter import operations as jupyter_operations
 from .services.jupyter import workdirs as jupyter_workdirs
 
 
@@ -401,23 +402,16 @@ def _cmd_jupyter_kernel(args: argparse.Namespace) -> int:
         return 0
 
     if command == "add":
-        python: Path | None = None
-        if args.python:
-            python = Path(args.python).expanduser()
-        if args.dir:
-            python = _python_from_dir(Path(args.dir).expanduser())
-        if python is None:
-            raise SystemExit("必须给出解释器路径，或用 --dir 指向包含 .venv 的项目目录")
-        spec = jupyter_kernels.add_kernel(
+        spec = jupyter_operations.add_kernel(
             install,
             runtime.memory,
-            python,
+            directory=args.dir,
+            python=args.python,
             name=args.name,
             display_name=args.display_name,
             replace=args.replace,
             install_dependency=args.install_ipykernel,
         )
-        jupyter_workdirs.set_managed(runtime.memory, spec.name, spec.python)
         _save_memory(runtime)
         if args.json:
             _emit(json.dumps(spec.as_dict(), ensure_ascii=False, indent=2))
@@ -437,10 +431,12 @@ def _cmd_jupyter_kernel(args: argparse.Namespace) -> int:
         return 0
 
     if command == "use":
-        spec = jupyter_kernels.require_found(install, runtime.memory, args.name)
-        if spec.broken:
-            raise SystemExit(f"内核 {spec.name} 的解释器不存在：{spec.python}")
-        jupyter_workdirs.remember(runtime.memory, Path(context.settings.root_dir), spec.name)
+        spec = jupyter_operations.select_kernel(
+            install,
+            runtime.memory,
+            args.name,
+            workdir=context.settings.root_dir,
+        )
         _save_memory(runtime)
         _emit(f"默认内核已设为 {spec.name}（{spec.display_name}）；运行中的服务需要 restart 后生效")
         return 0
@@ -454,40 +450,16 @@ def _cmd_jupyter_kernel(args: argparse.Namespace) -> int:
         return 0
 
     if command == "remove":
-        spec = jupyter_kernels.require_found(install, runtime.memory, args.name)
-        if not spec.managed and not args.force:
-            raise SystemExit(f"{spec.name} 不是启动器注册的内核；确认删除请加 --force\n  {spec.resource_dir}")
-        jupyter_kernels.remove_kernel(spec)
-        table = memory.section(runtime.memory, "jupyter")
-        if table.get("kernel") == spec.name:
-            memory.set_value(runtime.memory, "jupyter", "kernel", None)
-        mapping = table.get("workdir_kernels")
-        if isinstance(mapping, dict):
-            for key, value in list(mapping.items()):
-                if value == spec.name:
-                    mapping.pop(key, None)
-        jupyter_workdirs.set_managed(runtime.memory, spec.name, None)
+        spec = jupyter_operations.remove_kernel(
+            install,
+            runtime.memory,
+            args.name,
+            force=args.force,
+        )
         _save_memory(runtime)
         _emit(f"已删除内核 {spec.name}")
         return 0
     return 2
-
-
-def _python_from_dir(directory: Path) -> Path:
-    if directory.is_file():
-        return directory
-    if not directory.is_dir():
-        raise SystemExit(f"目录不存在：{directory}")
-    candidates = [
-        directory / ".venv" / "Scripts" / "python.exe",
-        directory / ".venv" / "bin" / "python",
-        directory / "venv" / "Scripts" / "python.exe",
-        directory / "venv" / "bin" / "python",
-    ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    raise SystemExit(f"{directory} 下没有找到 .venv/Scripts/python.exe 或 .venv/bin/python")
 
 
 def _cmd_jupyter_workdir(args: argparse.Namespace) -> int:
@@ -524,17 +496,15 @@ def _cmd_jupyter_workdir(args: argparse.Namespace) -> int:
         return 0
 
     if command == "use":
-        workdir = jupyter_workdirs.normalize(args.path)
         kernel = args.kernel
-        if kernel:
-            spec = jupyter_kernels.require_found(
-                runtime.context("jupyter", _jupyter_options(args)).adapter.install,
-                runtime.memory,
-                kernel,
-            )
-            if spec.broken:
-                raise SystemExit(f"内核 {spec.name} 的解释器不存在：{spec.python}")
-        jupyter_workdirs.remember(runtime.memory, workdir, kernel)
+        context = runtime.context("jupyter", _jupyter_options(args))
+        install = context.adapter.install if kernel else None
+        workdir = jupyter_operations.select_workdir(
+            install,
+            runtime.memory,
+            args.path,
+            kernel=kernel,
+        )
         _save_memory(runtime)
         _emit(f"工作目录已设为 {workdir}")
         try:
