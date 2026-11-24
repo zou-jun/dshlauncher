@@ -3,8 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from dshlauncher import paths, ports, service
-from dshlauncher.settings import Settings
+from weblauncher import paths, ports
+from weblauncher.services.dsh import service
+from weblauncher.services.dsh.settings import Settings
 
 LOG = """[launcher] start port=3080 at=2026-11-13 10:00:00
 
@@ -24,9 +25,9 @@ Plugins waiting for services (15):
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    monkeypatch.setenv("DSHLAUNCHER_HOME", str(tmp_path))
+    monkeypatch.setenv("WEBLAUNCHER_HOME", str(tmp_path))
     for name in ("PORT", "HOST", "CWD", "BROWSER", "NO_DEDUPE"):
-        monkeypatch.delenv("DSHLAUNCHER_" + name, raising=False)
+        monkeypatch.delenv("WEBLAUNCHER_DSH_" + name, raising=False)
     paths.data_dir.cache_clear()
     ports.excluded_ranges.cache_clear()
     yield tmp_path
@@ -77,7 +78,7 @@ def test_default_port_falls_back_when_reserved(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_reuses_port_from_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    paths.ensure_data_dir()
+    paths.Paths.current().service("dsh").ensure()
     paths.state_path().write_text('{"pid": 1, "create_time": 0.0, "port": 18081, "url": null}', "utf-8")
     monkeypatch.setattr(ports, "probe", _verdicts({18081: ports.Verdict(ports.FREE)}))
     assert service.Service(Settings()).effective_port() == 18081

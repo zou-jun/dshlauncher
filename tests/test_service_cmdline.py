@@ -1,4 +1,4 @@
-from dshlauncher.service import is_dsh_cmdline
+from weblauncher.services.dsh.service import is_dsh_cmdline
 
 
 def test_matches_bin_js_path() -> None:

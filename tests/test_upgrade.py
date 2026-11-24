@@ -7,9 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from dshlauncher import updates, upgrade
-from dshlauncher.paths import Paths
-from dshlauncher.settings import Settings
+from weblauncher.paths import Paths
+from weblauncher.services.dsh import updates, upgrade
+from weblauncher.services.dsh.settings import Settings
 
 
 class FakeService:

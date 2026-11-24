@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from dshlauncher.platform import linux, posix
+from weblauncher.platform import linux, posix
 
 
 def _recorder(calls: list[list[str]]):  # noqa: ANN202 - 测试辅助

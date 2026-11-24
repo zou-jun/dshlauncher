@@ -1,4 +1,4 @@
-# dshlauncher 的任务入口。
+# weblauncher 的任务入口。
 #
 # 依赖与环境由 uv 独立管理（uv sync / uv add / uv lock），这里不包装 uv：
 # 所有 recipe 直接调用 .venv 里的解释器，环境没建好时先自己 `uv sync`。
@@ -10,11 +10,12 @@ VENV_PY := .venv/bin/python
 endif
 
 PY   := $(VENV_PY)
-CLI  := $(PY) -m dshlauncher
+CLI  := $(PY) -m weblauncher
 ARGS ?=
+SERVICE ?= all
 
 .DEFAULT_GOAL := help
-.PHONY: help env lint format fmt-check test check open start stop restart status doctor updates tray smoke build deploy clean distclean
+.PHONY: help env lint format fmt-check test check open start stop restart status doctor updates jupyter tray smoke build deploy clean distclean
 
 help:  ## 列出全部目标
 	@$(PY) -c "import pathlib,re;[print(f'  {m[1]:<10}{m[2]}') for m in (re.match(r'^([a-z][a-z-]*):.*?##\s*(.+)', l.rstrip()) for l in pathlib.Path('Makefile').read_text('utf-8').splitlines()) if m]"
@@ -39,34 +40,37 @@ test:  ## 跑单测；可透传：make test ARGS="-k port -q"
 
 check: lint fmt-check test  ## 提交前一条命令
 
-open:  ## 确保服务在跑并打开窗口（不常驻托盘）
-	@$(CLI) open
+open:  ## 确保服务在跑并打开窗口；SERVICE=dsh / jupyter / all
+	@$(CLI) open $(SERVICE)
 
-start:  ## 只启动服务
-	@$(CLI) start
+start:  ## 只启动服务；SERVICE=dsh / jupyter / all
+	@$(CLI) start $(SERVICE)
 
-stop:  ## 停止服务
-	@$(CLI) stop
+stop:  ## 停止服务；SERVICE=dsh / jupyter / all
+	@$(CLI) stop $(SERVICE)
 
-restart:  ## 重启服务（dsh 升级后用）
-	@$(CLI) restart
+restart:  ## 重启服务（依赖升级后用）
+	@$(CLI) restart $(SERVICE)
 
-status:  ## 查看服务 PID / 端口 / token URL
-	@$(CLI) status
+status:  ## 查看服务 PID / 端口 / URL；SERVICE=dsh / jupyter / all
+	@$(CLI) status $(SERVICE)
 
 doctor:  ## 依赖发现与端口自检
-	@$(CLI) doctor
+	@$(CLI) doctor $(SERVICE)
 
 updates:  ## 检查 dsh / 插件更新；ARGS="--json" 或 ARGS="--panel"
-	@$(CLI) updates $(ARGS)
+	@$(CLI) dsh updates $(ARGS)
+
+jupyter:  ## 打开 Jupyter Lab（必要时启动服务）
+	@$(CLI) open jupyter
 
 tray:  ## 前台运行系统托盘（双击 exe 的等价形态，Ctrl+C 退出）
 	@$(CLI) tray
 
-smoke:  ## 真机冒烟：start → status → stop
-	@$(CLI) start
-	@$(CLI) status
-	@$(CLI) stop
+smoke:  ## 真机冒烟：start all → status all → stop all
+	@$(CLI) start all
+	@$(CLI) status all
+	@$(CLI) stop all
 
 build:  ## PyInstaller 打包并部署到 app/
 	@$(PY) scripts/build.py
@@ -77,5 +81,5 @@ deploy:  ## 只重新部署（用上次的 .build 产物）
 clean:  ## 删除 .build / .cache / __pycache__
 	@$(PY) -c "import pathlib,shutil;[shutil.rmtree(p, ignore_errors=True) for p in ('.build','.cache')];[shutil.rmtree(p, ignore_errors=True) for root in ('src','tests','scripts','packaging') for p in pathlib.Path(root).rglob('__pycache__')]"
 
-distclean: clean  ## clean + 清空 app/（保留 app/.dshlauncher 数据）
-	@$(PY) -c "import pathlib,shutil;app=pathlib.Path('app');[shutil.rmtree(p) if p.is_dir() else p.unlink() for p in (app.iterdir() if app.is_dir() else []) if p.name != '.dshlauncher']"
+distclean: clean  ## clean + 清空 app/（保留 app/.weblauncher 数据）
+	@$(PY) -c "import pathlib,shutil;app=pathlib.Path('app');[shutil.rmtree(p) if p.is_dir() else p.unlink() for p in (app.iterdir() if app.is_dir() else []) if p.name not in {'.weblauncher', '.dshlauncher'}]"

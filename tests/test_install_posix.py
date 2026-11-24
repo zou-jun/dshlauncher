@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from dshlauncher.install import posix
+from weblauncher.install import posix
 
 
 def test_create_reports_unsupported() -> None:
@@ -15,8 +15,10 @@ def test_create_reports_unsupported() -> None:
 
 
 def test_remove_cleans_legacy_desktop_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(posix, "_targets", lambda: [tmp_path])
-    legacy = tmp_path / "dsh.desktop"
+    monkeypatch.setattr(posix.Path, "home", classmethod(lambda cls: tmp_path))
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    legacy = desktop / "dsh.desktop"
     legacy.write_text("", "utf-8")
     assert posix.remove() == [legacy]
     assert not legacy.exists()

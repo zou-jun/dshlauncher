@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from dshlauncher import paths
+from weblauncher import paths
 
 
 def test_write_atomic_replaces_and_cleans_temp(tmp_path: Path) -> None:
@@ -44,3 +44,18 @@ def test_audit_collapses_detail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     paths.audit("boom", detail="Traceback\n  line one\n  line two")
     text = (tmp_path / "launcher.log").read_text("utf-8")
     assert "boom | Traceback | line one | line two" in text
+
+
+def test_legacy_brand_data_dir_is_renamed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("WEBLAUNCHER_HOME", raising=False)
+    monkeypatch.setattr(paths, "executable_dir", lambda: tmp_path)
+    old = tmp_path / ".dshlauncher"
+    old.mkdir()
+    (old / "marker").write_text("x", "utf-8")
+    paths.data_dir.cache_clear()
+    try:
+        assert paths.data_dir() == tmp_path / ".weblauncher"
+        assert (tmp_path / ".weblauncher" / "marker").read_text("utf-8") == "x"
+        assert not old.exists()
+    finally:
+        paths.data_dir.cache_clear()

@@ -7,14 +7,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from dshlauncher import paths, service
-from dshlauncher.settings import Settings
+from weblauncher import paths
+from weblauncher.services.dsh import service
+from weblauncher.services.dsh.settings import Settings
 
 
 @pytest.fixture(autouse=True)
 def state_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(paths, "data_dir", lambda: tmp_path)
-    return tmp_path / "state.json"
+    target = tmp_path / "services" / "dsh" / "state.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return target
 
 
 def test_stop_uses_state_port_and_removes_state(state_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -43,7 +46,7 @@ def test_stop_does_not_kill_foreign_listener(state_file: Path, monkeypatch: pyte
     monkeypatch.setattr(controller, "read_state", lambda: None)
     monkeypatch.setattr(controller, "live_process", lambda value: None)
     monkeypatch.setattr(controller, "port_owner_process", lambda port=None: SimpleNamespace(pid=9))
-    monkeypatch.setattr(controller, "_is_dsh_process", lambda proc: False)
+    monkeypatch.setattr(controller, "_is_owned", lambda proc, port=None: False)
     monkeypatch.setattr(controller, "_kill_tree", lambda pid: killed.append(pid))
 
     assert controller.stop() is False
@@ -64,7 +67,7 @@ def test_stop_checks_last_known_port_for_stale_state(
     monkeypatch.setattr(controller, "read_state", lambda: state)
     monkeypatch.setattr(controller, "live_process", lambda value: None)
     monkeypatch.setattr(controller, "port_owner_process", owner)
-    monkeypatch.setattr(controller, "_is_dsh_process", lambda proc: True)
+    monkeypatch.setattr(controller, "_is_owned", lambda proc, port=None: True)
     monkeypatch.setattr(controller, "_kill_tree", lambda pid: killed.append(pid))
     monkeypatch.setattr(controller, "_wait_port_closed", lambda port: None)
     monkeypatch.setattr(controller, "port_open", lambda port=None: False)
@@ -101,7 +104,7 @@ def test_stop_checks_planned_port_without_state(state_file: Path, monkeypatch: p
     monkeypatch.setattr(controller, "live_process", lambda value: None)
     monkeypatch.setattr(controller, "effective_port", lambda: 18080)
     monkeypatch.setattr(controller, "port_owner_process", owner)
-    monkeypatch.setattr(controller, "_is_dsh_process", lambda proc: True)
+    monkeypatch.setattr(controller, "_is_owned", lambda proc, port=None: True)
     monkeypatch.setattr(controller, "_kill_tree", lambda pid: killed.append(pid))
     monkeypatch.setattr(controller, "_wait_port_closed", lambda port: None)
     monkeypatch.setattr(controller, "port_open", lambda port=None: False)

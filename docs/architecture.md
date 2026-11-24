@@ -2,115 +2,142 @@
 
 ## 进程模型
 
-- **启动器进程**：CLI 或托盘二选一；托盘常驻，CLI 命令短命。
-- **dsh web 服务**：`Service.start()` 以分离进程启动的 `node .../dsh web`，关闭终端/托盘不影响。
-- **浏览器窗口**：独立 `--user-data-dir` 的 Chromium `--app` 窗口，dedupe 时置前；服务未就绪时先显示本地过场页。
+- **启动器进程**：CLI 短命；托盘常驻。两者通过 `Runtime` 读取同一份配置/记忆。
+- **被托管服务**：每个服务是一个独立分离进程（dsh = node，Jupyter = uv tool 的 python），
+  关闭终端/托盘不影响；托盘退出可选择保留或停止。
+- **浏览器窗口**：每个服务独立的 Chromium `--user-data-dir`，dedupe 只在自己 profile 内生效。
 
 ```mermaid
-graph TD
-  Entry[__main__.py] --> CLI[CLI 参数 / 命令 / 格式化]
-  Entry --> Tray[tray.app pystray 适配]
-  CLI --> Ctx[Context]
-  Tray --> Ctx
-  Ctx --> Paths[Paths 数据目录]
-  Ctx --> Backend[platform 后端]
-  Ctx --> Svc[Service facade]
-  Svc --> State[state.py 原子 state.json]
-  Svc --> Logs[logs.py 日志解析 / 轮转]
-  Svc --> Status[status.py ServiceStatus]
-  Svc --> Ports[ports.py 端口规划]
-  Svc --> Disc[discovery.py 缓存探测]
-  Svc --> Browser[browser.py 窗口启动]
-  Browser --> Backend
-  Tray --> Single[tray.single 单实例锁]
-  Tray --> IPC[tray.ipc 客户端 / 服务器]
-  Tray --> Ctrl[tray.controller 动作 / 忙碌 / 退出]
-  Ctrl --> Svc
-  CLI --> Doctor[doctor.py 诊断报表]
-  CLI --> Upd[updates.py 版本检查]
-  Tray --> Panel[updates_panel.py 本地面板]
-  Panel --> Upg[upgrade.py 升级编排]
-  Upd --> Disc
-  Upd --> Browser
-  Upg --> Svc
-  Upg --> Disc
+flowchart TB
+  Entry[__main__.py] --> CLI[全局命令 / 服务命令]
+  Entry --> Tray[tray.app]
+  CLI --> Reg[services.registry]
+  Tray --> Ctx[ServiceContext]
+  Reg --> Ctx
+  Ctx --> Sup[Supervisor]
+  Sup --> Adapter[services/base.ServiceAdapter]
+  Adapter --> Dsh[services/dsh]
+  Adapter --> Jup[services/jupyter]
+  Sup --> State[state.json]
+  Sup --> Ports[ports.py]
+  Sup --> Proc[process.py]
+  Sup --> Logs[logs.py]
+  Sup --> Status[status.py]
+  Tray --> Locks[single / ipc / per-service locks]
 ```
 
-## 模块职责
+## 分层与模块
 
-| 模块 | 职责 |
-|---|---|
-| `paths.py` | 数据目录解析、`Paths` 文件布局、原子写、审计日志 |
-| `settings.py` | CLI > 环境变量 > `config.toml` > 默认值 |
-| `context.py` | `Settings + Paths + 平台后端` 的运行时上下文 |
-| `service.py` | 服务生命周期 facade：端口规划、启动/停止/就绪、状态快照 |
-| `state.py` / `logs.py` / `status.py` | 状态持久化、日志解析与轮转、展示模型 |
-| `ports.py` / `discovery.py` / `browser.py` | 端口判定、依赖发现、Chromium 窗口 |
-| `splash.py` | 启动过场页：本地 HTTP 轮询状态，ready 后跳转 dsh |
-| `updates.py` | dsh / profile 版本发现、semver 比较、`npm outdated` 解析、报告模型 |
-| `upgrade.py` | 升级任务：停服、全局安装、`dsh plugin add`、重启、日志与状态 |
-| `updates_panel.py` | loopback 更新面板：token 校验、检查/升级 JSON API、内联 HTML/JS |
-| `tray/` | `single` 锁、`ipc` 本地请求、`controller` 动作、`app` pystray/菜单 |
-| `platform/` | 分离进程、窗口控制、打开路径、原生消息框；`Backend` 协议 + 契约测试 |
-| `install/` | Windows `.lnk`、Linux `.desktop`；macOS 明确报不支持自动安装 |
-| `__main__.py` / `doctor.py` | CLI 入口与诊断报表 |
+| 层 | 模块 | 职责 |
+|---|---|---|
+| 共享 | `paths.py` | 数据目录、`config.toml` / `memory.toml`、`services/<id>/`、原子写、旧布局迁移 |
+| 共享 | `config.py` | `[launcher] [ui] [dsh] [jupyter]` 读取；`config set` 按行编辑保留注释 |
+| 共享 | `memory.py` | 启动器写的选择记忆（工作目录、最近目录、内核、按目录内核） |
+| 共享 | `ports.py` | 真实 bind 探测、Windows 保留段、候选端口 |
+| 共享 | `process.py` | 分离启动、进程树终止、pid + create_time |
+| 共享 | `supervisor.py` | 通用生命周期：端口规划 → spawn → 就绪 → 状态 → 停止 |
+| 共享 | `state.py` / `logs.py` / `status.py` | 状态文件、日志尾部/轮转、展示快照 |
+| 共享 | `discovery.py` / `browser.py` / `splash.py` | Chromium 发现、应用窗口、慢启动过场页 |
+| 服务层 | `services/base.py` | `ServiceSpec` / `LaunchPlan` / `ServiceAdapter` 协议 |
+| 服务层 | `services/registry.py` | 服务 id 列表、`all`/逗号解析、按 id 组装 settings + adapter |
+| 服务层 | `services/dsh/` | node/bin.js 发现、token URL 解析、接管端口、updates/upgrade/panel |
+| 服务层 | `services/jupyter/` | uv tool 发现、HTTP 就绪/关闭、kernelspec 注册、工作目录记忆 |
+| UI | `tray/` | 多服务菜单、每服务锁、单实例/IPC、更新面板入口 |
+| UI | `install/` | 主托盘入口 + 每服务快捷方式（Windows `.lnk` / Linux `.desktop`） |
+| 平台 | `platform/` | 分离进程、窗口枚举/置前、打开路径、原生消息框 |
 
-## 数据文件
+依赖方向：`services/*` → 共享模块；共享模块不导入 `services/*` 的具体服务，
+唯一允许出现服务名的地方是 `services/registry.py` 和对应的 `services/<id>/`。
 
-| 文件 | 说明 |
-|---|---|
-| `state.json` | 服务 pid / create_time / port / url；临时文件 + `os.replace` 原子写 |
-| `dsh-web.log` | 服务 stdout；含每次启动的 `[launcher] start` 标记与 token URL |
-| `launcher.log` | 启动器动作审计；超过 1 MB 轮转为 `.1`，异常附调用点摘要 |
-| `upgrades.log` | 升级任务完整日志；内存面板只保留尾部 600 行，文件超过 1 MB 轮转 |
-| `browser/` | 专用 Chromium profile；cookie 绑 `host:port` |
-| `panel-browser/` | 更新面板的独立 Chromium profile |
-| `tray.lock` | 托盘单实例锁（pid + create_time） |
-| `tray.json` | 托盘 loopback IPC 端口与随机 token；正常退出删除 |
-| `config.toml` | 可选配置 |
+## 服务契约
 
-## 启动与退出
+```python
+class ServiceAdapter(Protocol):
+    spec: ServiceSpec  # id / 默认端口 / 回退端口 / 是否接管 / 是否过场
+    settings: Any  # 该服务的配置对象（含 UI 字段）
 
-1. 双击 / `tray`：`tray.run()` 先读 `tray.json` 投递 `open`；没有托盘时用 `tray.lock` 抢单实例，失败则等 30s 后兜底直接开窗口。
-2. 托盘启动：绑定 loopback 端口、写 `tray.json`、显示图标，`setup` 线程执行 `actions.open_dsh()`。
-3. `open_dsh`：服务已就绪 → 直接 `browser.launch()`（dedupe 置前或新开）；未就绪 → 先开本地过场页 `splash.py`，`Service.ensure()` 就绪后页面自己跳到 dsh。
-4. 退出：`TrayController` 排队等待当前动作，停止 dsh，移除图标；窗口保留。
-5. 更新面板：托盘菜单启动 loopback `PanelServer` 并打开独立窗口；升级任务占用托盘忙碌锁，先停服务、按 dsh → 插件顺序执行、最后重启；面板与服务器随托盘退出关闭。
-6. 崩溃/强杀：锁和信息文件在下次启动按 pid/create_time 自动清理；服务保持分离运行。
+    def prepare(self, *, host, port) -> LaunchPlan: ...
+    def ready(self, plan, state, *, port_open, log_text) -> str | None: ...
+    def request_stop(self, state) -> bool: ...  # True = 已发出优雅停止
+    def owns_process(self, cmdline, port=None) -> bool: ...
+    def start_failure(self, log_text, port) -> str: ...
+    def url_from_log(self, log_text) -> str | None: ...
+    def work_dir(self) -> Path: ...
+    def status_extra(self, state) -> dict[str, str]: ...
+    def doctor_rows(self) -> list[tuple[str, str]]: ...
+```
+
+两个实现的差异：
+
+| 能力 | dsh | Jupyter |
+|---|---|---|
+| 服务进程 | `node <bin.js> web --host --port` | `jupyter-lab --no-browser --ServerApp.*` |
+| token | 服务自己生成，从日志 `dsh web: <url>` 取 | 启动器生成，经 `JUPYTER_TOKEN` 环境变量传入 |
+| 就绪 | 日志出现新标记后的 URL + 端口可连 | `GET <base>api/status` + `Authorization: token` |
+| 停止 | 直接杀进程树 | `POST <base>api/shutdown`，超时才杀树 |
+| 端口占用 | 是同类 dsh 则接管 | 自动换端口，不接管 |
+| 专属命令 | `dsh updates` | `jupyter kernel` / `jupyter workdir` |
+
+## 数据与配置
+
+```
+<数据目录>/                 默认 exe 同级 .weblauncher/，可 WEBLAUNCHER_HOME 覆盖
+  config.toml               手写/命令写入；注释保留
+  memory.toml               启动器原子重写
+  launcher.log              动作审计
+  upgrades.log              dsh 升级日志
+  panel-browser/            更新面板专用浏览器配置
+  tray.lock / tray.json     托盘单实例锁与 loopback IPC
+  services/
+    dsh/    state.json  service.log  browser/
+    jupyter/state.json  service.log  browser/
+```
+
+优先级：
+
+- 运行参数：CLI > 服务环境变量 > `config.toml` > 默认值
+- 工作目录：`--root` > `WEBLAUNCHER_JUPYTER_ROOT` > `[jupyter].root_dir` > `memory.workdir` > `~`
+- 内核：`--kernel` > `WEBLAUNCHER_JUPYTER_KERNEL` > 按目录记忆 > 全局记忆 > `[jupyter].kernel` > Jupyter 默认
+- 端口：CLI > 环境变量 > `[<service>].port`；省略时上次端口 → 配置端口 → 回退序列，
+  并排除其它服务已配置/上次使用的端口
+
+旧品牌数据目录 `.dshlauncher/` 与旧单服务文件（根目录 `state.json` / `dsh-web.log` / `browser/`）在启动时
+分别迁移到 `.weblauncher/` 与 `services/dsh/`，配置里的平铺字段继续兼容读取。
+
+## 生命周期
+
+1. `Supervisor.effective_port()`：排除其它服务端口 → 探测上次/配置/回退候选。
+2. `start()`：可信 state 且进程存活 → 复用；显式换端口 → 先停旧实例。
+3. `adapter.prepare()` 生成 argv/env/cwd；核心写 `[launcher] start` 标记后分离启动。
+4. 写 `state.json`（pid/create_time/port/url/token/extra）。
+5. 轮询 `adapter.ready()`；进程消失或超时则杀树、删 state，并附上适配器的失败解释。
+6. `stop()`：state 可信 → 优雅停止 → 等端口释放 → 兜底杀树；state 不可信时只有
+   dsh 允许按端口扫描（`stop_untracked`），Jupyter 只报告占用者。
 
 ## 并发约定
 
-- 菜单回调立即返回，重活在 worker 线程；`TrayController` 的忙碌锁保证同一时刻只有一个服务动作。
-- 托盘标题每 2s 刷新；菜单重建经 0.15s 合并定时器，减少句柄重建。
-- `Service` 读状态不再写实例字段；`ServiceStatus` 是一次性快照。
-- `launcher.log` 多进程追加；写入行小且带时间戳。
+- 托盘每个服务一把动作锁；「启动全部/停止全部」按服务 id 排序依次拿锁，避免死锁。
+- 菜单回调立即返回，动作在 worker 线程执行；刷新合并 0.15s，标题 2s 轮询。
+- `Supervisor` 的读操作不修改实例状态；`ServiceStatus` 是一次性快照。
+- 浏览器 dedupe 按各自 `--user-data-dir` 判定，两个服务的窗口互不干扰。
 
-## 扩展点
+## 新增一个服务
 
-- 新 CLI 命令：`HANDLERS` + `build_parser`。
-- 新托盘菜单项：`tray/app.py::_menu` + `tray/controller.py` 动作。
-- 新平台：实现 `platform/base.py` 的 `Backend` 协议；`test_all_backends_implement_protocol` 会检查漏项。
-- 新运行时文件：在 `Paths` 加属性，不要在模块里拼接目录。
+1. 建 `services/<id>/`，实现 `ServiceAdapter`（通常 150–300 行）。
+2. 在 `services/registry.py` 的 `SERVICE_IDS` / `build()` / `_definition()` 注册。
+3. 在 `config.py` 文档与 `config.toml` 里加 `[<id>]` 默认值。
+4. 需要专属命令时在 `__main__.py` 增加子命令组。
+5. 加适配器测试：argv、就绪、停止、进程归属、状态扩展；共享层已有契约测试。
+6. `make smoke SERVICE=<id>` 真机验证 start → status → stop。
 
-## 已知取舍
-
-- `install/discovery/settings` 的配置读取仍使用模块级 `Paths.current()`；正常入口只有一个数据目录。嵌入/测试需要显式传 `Paths`。
-- macOS `install` 不自动创建入口（Finder 别名无法携带 `-m dshlauncher` 参数）；直接运行 `tray` 或手动创建别名。
-- 菜单状态标签只在托盘动作后刷新；外部 `start/stop` 后点「刷新状态」；「服务状态」弹窗每次实时读取。
-- Windows 11 新托盘图标默认进溢出区，需要手动固定一次。
+不引入 YAML 驱动的“任意进程”配置：就绪、鉴权与优雅停止差异太大，最终会退化成 if/else。
 
 ## 验证
 
 ```bash
-make check                     # ruff + 全量单测
-make build                     # PyInstaller 打包并部署到 app/
-dshlauncher.exe doctor         # 依赖、托盘后端/进程、端口、服务
-dshlauncher.exe status --json  # 脚本可消费的状态
-dshlauncher.exe doctor --json  # 诊断 rows
-```
-
-隔离冒烟（不影响真实数据）：
-
-```bash
-DSHLAUNCHER_HOME=/tmp/dsh-smoke DSHLAUNCHER_PORT=18090 dshlauncher tray
+make check                 # ruff + 全量单测
+make smoke                 # start all → status all → stop all
+make build                 # PyInstaller 打包并部署到 app/
+weblauncher doctor         # 每个服务的依赖、端口、状态
+weblauncher status all --json
 ```

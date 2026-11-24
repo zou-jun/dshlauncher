@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from http.client import HTTPConnection
 
-from dshlauncher.splash import SplashServer
+from weblauncher.splash import SplashServer
 
 
 def _get(server: SplashServer, path: str) -> tuple[int, bytes]:

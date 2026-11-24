@@ -8,16 +8,16 @@ from typing import Any
 
 import pytest
 
-from dshlauncher import actions
-from dshlauncher.paths import Paths
-from dshlauncher.settings import Settings
-from dshlauncher.state import State
+from weblauncher import actions
+from weblauncher.paths import Paths
+from weblauncher.services.dsh.settings import Settings
+from weblauncher.state import State
 
 
 class FakeSplash:
     instances: list[FakeSplash] = []
 
-    def __init__(self) -> None:
+    def __init__(self, title: str = "服务") -> None:
         self.url = "http://127.0.0.1:1/splash/"
         self.started = False
         self.ready_url: str | None = None
@@ -51,6 +51,8 @@ def _context(tmp_path: Path, controller: object) -> Any:
         settings=Settings(),
         paths=Paths(tmp_path),
         backend=object(),
+        service_id="dsh",
+        spec=SimpleNamespace(use_splash=True, label="dsh web"),
         service=lambda: controller,
     )
 
@@ -77,7 +79,7 @@ def test_open_uses_splash_when_service_not_live(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setattr(actions, "SplashServer", FakeSplash)
     monkeypatch.setattr(actions.browser, "launch", fake_launch)
 
-    result = actions.open_dsh(_context(tmp_path, controller))
+    result = actions.open_service(_context(tmp_path, controller))
 
     splash = FakeSplash.instances[-1]
     assert splash.started
@@ -103,7 +105,7 @@ def test_open_keeps_splash_alive_when_page_has_not_loaded(
     monkeypatch.setattr(actions.browser, "launch", lambda settings, url, **kwargs: "new")
     monkeypatch.setattr(FakeSplash, "wait_delivered", lambda self, timeout: False)
 
-    actions.open_dsh(_context(tmp_path, controller))
+    actions.open_service(_context(tmp_path, controller))
 
     assert FakeSplash.instances[-1].closed == 30.0
 
@@ -125,7 +127,7 @@ def test_open_skips_splash_when_service_already_live(tmp_path: Path, monkeypatch
     monkeypatch.setattr(actions, "SplashServer", FakeSplash)
     monkeypatch.setattr(actions.browser, "launch", fake_launch)
 
-    result = actions.open_dsh(_context(tmp_path, controller))
+    result = actions.open_service(_context(tmp_path, controller))
 
     assert FakeSplash.instances == []
     assert calls == [state.url]
@@ -146,7 +148,7 @@ def test_open_shows_startup_error_in_splash(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setattr(actions.browser, "launch", lambda settings, url, **kwargs: "new")
 
     with pytest.raises(RuntimeError, match="startup failed"):
-        actions.open_dsh(_context(tmp_path, controller))
+        actions.open_service(_context(tmp_path, controller))
 
     splash = FakeSplash.instances[-1]
     assert splash.failed and "startup failed" in splash.failed

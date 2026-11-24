@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from dshlauncher import browser, discovery
-from dshlauncher.geometry import Rect
-from dshlauncher.settings import Settings
+from weblauncher import browser, discovery
+from weblauncher.geometry import Rect
+from weblauncher.services.dsh.settings import Settings
 
 CHROME = discovery.Browser("chrome", Path("/usr/bin/google-chrome-stable"))
 TARGET = Rect(10, 20, 800, 600)

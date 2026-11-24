@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from dshlauncher import discovery
+from weblauncher.services.dsh import discovery
 
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("NODE", "DSH_BIN"):
-        monkeypatch.delenv("DSHLAUNCHER_" + name, raising=False)
+        monkeypatch.delenv("WEBLAUNCHER_DSH_" + name, raising=False)
     discovery.reset_cache()
     yield
     discovery.reset_cache()

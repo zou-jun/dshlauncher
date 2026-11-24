@@ -1,4 +1,4 @@
-from dshlauncher.service import parse_url
+from weblauncher.services.dsh.service import parse_url
 
 
 def test_uses_url_after_latest_start_marker() -> None:

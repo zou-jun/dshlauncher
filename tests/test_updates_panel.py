@@ -10,9 +10,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from dshlauncher import updates, updates_panel
-from dshlauncher.paths import Paths
-from dshlauncher.settings import Settings
+from weblauncher.paths import Paths
+from weblauncher.services.dsh import panel as updates_panel
+from weblauncher.services.dsh import updates
+from weblauncher.services.dsh.settings import Settings
 
 
 def _report() -> updates.UpdateReport:

@@ -1,4 +1,4 @@
-from dshlauncher.geometry import Rect, needs_fix, preferred_rect
+from weblauncher.geometry import Rect, needs_fix, preferred_rect
 
 WORK = Rect(0, 0, 2048, 1104)
 

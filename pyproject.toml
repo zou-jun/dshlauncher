@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "dshlauncher"
-version = "0.4.0"
-description = "DeepSeek Harness 启动器：托管 dsh web 服务并在无扩展的 Chromium 窗口里打开 UI"
+name = "weblauncher"
+version = "0.6.0"
+description = "本地服务启动器：托管 dsh web / Jupyter Lab，并在独立 Chromium 窗口里打开 UI"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-dshlauncher = "dshlauncher.__main__:main"
+weblauncher = "weblauncher.__main__:main"
 
 [dependency-groups]
 dev = [
@@ -33,7 +33,7 @@ url = "https://pypi.org/simple"
 default = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/dshlauncher"]
+packages = ["src/weblauncher"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -3,7 +3,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from dshlauncher import ports
+from weblauncher import ports
 
 
 @pytest.fixture(autouse=True)

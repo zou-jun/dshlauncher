@@ -2,7 +2,7 @@ import sys
 
 import pytest
 
-from dshlauncher import __main__ as cli
+from weblauncher import __main__ as cli
 
 
 class FakeStream:

@@ -1,13 +1,13 @@
 import pytest
 
-from dshlauncher import platform as platform_mod
-from dshlauncher.geometry import Rect
-from dshlauncher.platform import linux, posix
-from dshlauncher.platform import windows as windows_mod
+from weblauncher import platform as platform_mod
+from weblauncher.geometry import Rect
+from weblauncher.platform import linux, posix
+from weblauncher.platform import windows as windows_mod
 
 
 def test_load_follows_platform(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("DSHLAUNCHER_WINDOW_BACKEND", raising=False)
+    monkeypatch.delenv("WEBLAUNCHER_WINDOW_BACKEND", raising=False)
     monkeypatch.setattr(platform_mod.sys, "platform", "linux")
     assert platform_mod.load() is linux
     monkeypatch.setattr(platform_mod.sys, "platform", "win32")
@@ -18,7 +18,7 @@ def test_load_follows_platform(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_explicit_backend_overrides_platform(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(platform_mod.sys, "platform", "linux")
-    monkeypatch.setenv("DSHLAUNCHER_WINDOW_BACKEND", "posix")
+    monkeypatch.setenv("WEBLAUNCHER_WINDOW_BACKEND", "posix")
     assert platform_mod.load() is posix
 
 
@@ -41,7 +41,7 @@ def test_workarea_rejects_empty() -> None:
 
 
 def test_all_backends_implement_protocol() -> None:
-    from dshlauncher.platform import base
+    from weblauncher.platform import base
 
     required = [name for name in dir(base.Backend) if not name.startswith("_")]
     for backend in (windows_mod, linux, posix):

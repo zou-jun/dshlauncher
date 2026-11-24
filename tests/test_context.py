@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dshlauncher.context import Context
-from dshlauncher.paths import Paths
-from dshlauncher.settings import Settings
+from weblauncher.paths import Paths
+from weblauncher.services.dsh.context import Context
+from weblauncher.services.dsh.settings import Settings
 
 
 def test_context_binds_profile_to_paths(tmp_path: Path) -> None:
     context = Context.create(Settings(), paths_=Paths(tmp_path))
     assert context.paths.data == tmp_path
-    assert context.settings.profile_dir == tmp_path / "browser"
+    assert context.settings.profile_dir == tmp_path / "services" / "dsh" / "browser"
     assert context.service().paths == context.paths
 
 

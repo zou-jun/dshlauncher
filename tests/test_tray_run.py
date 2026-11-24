@@ -6,39 +6,38 @@ from pathlib import Path
 
 import pytest
 
-from dshlauncher.context import Context
-from dshlauncher.paths import Paths
-from dshlauncher.settings import Settings
-from dshlauncher.tray import app as tray_app
-from dshlauncher.tray.ipc import TrayUnavailable
+from weblauncher import paths
+from weblauncher.context import Runtime
+from weblauncher.tray import app as tray_app
+from weblauncher.tray.ipc import TrayUnavailable
 
 
-def _context(tmp_path: Path) -> Context:
-    return Context.create(Settings(), paths_=Paths(tmp_path))
+def _runtime(tmp_path: Path, backend: object | None = None) -> Runtime:
+    return Runtime.create(paths_=paths.Paths(tmp_path), backend=backend, migrate=False)
 
 
 def test_run_delegates_to_existing_tray(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[float] = []
 
-    def fake_send(paths_: Paths, timeout: float, *, wait: float = 0.0) -> str:
+    def fake_send(paths_, timeout: float, *, wait: float = 0.0) -> str:
         calls.append(wait)
         return "opened"
 
     monkeypatch.setattr(tray_app, "send_open", fake_send)
-    assert tray_app.run(Settings(), context=_context(tmp_path)) == 0
+    assert tray_app.run(_runtime(tmp_path)) == 0
     assert calls == [0.0]
 
 
 def test_run_becomes_tray_when_lock_acquired(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_send(paths_: Paths, timeout: float, *, wait: float = 0.0) -> str:
+    def fake_send(paths_, timeout: float, *, wait: float = 0.0) -> str:
         raise TrayUnavailable("none")
 
     lock = object()
     released: list[object] = []
 
     class FakeApp:
-        def __init__(self, settings: Settings, *, context: Context) -> None:
-            self.context = context
+        def __init__(self, runtime: Runtime) -> None:
+            self.runtime = runtime
 
         def run(self) -> int:
             return 7
@@ -48,25 +47,29 @@ def test_run_becomes_tray_when_lock_acquired(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(tray_app, "release_lock", lambda value: released.append(value))
     monkeypatch.setattr(tray_app, "TrayApp", FakeApp)
 
-    assert tray_app.run(Settings(), context=_context(tmp_path)) == 7
+    assert tray_app.run(_runtime(tmp_path)) == 7
     assert released == [lock]
 
 
 def test_run_falls_back_to_direct_open_when_lock_busy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def fake_send(paths_: Paths, timeout: float, *, wait: float = 0.0) -> str:
+    def fake_send(paths_, timeout: float, *, wait: float = 0.0) -> str:
         raise TrayUnavailable("none")
 
-    opened: list[Context] = []
+    opened: list[str] = []
 
-    def fake_open(context: Context) -> str:
-        opened.append(context)
-        return "pid=1 started=True window=new"
+    class FakeApp:
+        def __init__(self, runtime: Runtime) -> None:
+            self.runtime = runtime
+
+        def _open_defaults(self) -> str:
+            opened.append("open")
+            return "ok"
 
     monkeypatch.setattr(tray_app, "send_open", fake_send)
     monkeypatch.setattr(tray_app, "acquire_lock", lambda paths_: None)
-    monkeypatch.setattr(tray_app.actions, "open_dsh", fake_open)
+    monkeypatch.setattr(tray_app, "TrayApp", FakeApp)
 
-    assert tray_app.run(Settings(), context=_context(tmp_path)) == 0
-    assert len(opened) == 1
+    assert tray_app.run(_runtime(tmp_path)) == 0
+    assert opened == ["open"]

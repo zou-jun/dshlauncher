@@ -6,9 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from dshlauncher import paths, service
-from dshlauncher.settings import Settings
-from dshlauncher.status import ServiceStatus
+from weblauncher import paths
+from weblauncher.services.dsh import service
+from weblauncher.services.dsh.settings import Settings
+from weblauncher.status import ServiceStatus
 
 STATUS = ServiceStatus(
     running=True,

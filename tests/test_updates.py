@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from dshlauncher import updates
-from dshlauncher.settings import Settings
+from weblauncher.services.dsh import updates
+from weblauncher.services.dsh.settings import Settings
 
 
 def test_semver_orders_prereleases_numerically() -> None:

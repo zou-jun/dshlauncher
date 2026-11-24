@@ -2,13 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from dshlauncher import paths, settings
+from weblauncher import paths
+from weblauncher.services.dsh import settings
 
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("DSHLAUNCHER_HOME", str(tmp_path))
-    monkeypatch.delenv("DSHLAUNCHER_OZONE", raising=False)
+    monkeypatch.setenv("WEBLAUNCHER_HOME", str(tmp_path))
+    monkeypatch.delenv("WEBLAUNCHER_OZONE", raising=False)
     paths.data_dir.cache_clear()
     yield tmp_path
     paths.data_dir.cache_clear()
@@ -24,7 +25,7 @@ def test_env_beats_file(isolated_home: Path) -> None:
 
 
 def test_explicit_beats_env(isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DSHLAUNCHER_OZONE", "wayland")
+    monkeypatch.setenv("WEBLAUNCHER_OZONE", "wayland")
     assert settings.load(ozone="x11").ozone == "x11"
 
 

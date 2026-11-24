@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.6.0
+
+- 项目更名为 `weblauncher`：包名、exe、console script、数据目录、PyInstaller spec 与文档统一。
+- 数据目录 `.dshlauncher/` 首次启动时自动改名为 `.weblauncher/`；旧的单服务文件仍继续迁移到 `services/dsh/`。
+- 环境变量改为统一前缀：`WEBLAUNCHER_*`（共享）、`WEBLAUNCHER_DSH_*`、`WEBLAUNCHER_JUPYTER_*`。
+- 桌面入口主快捷方式改为 `weblauncher.lnk` / `weblauncher.desktop`，并清理旧 `dsh.lnk` / `dshlauncher.*`。
+- 托盘标题改为「Web 服务启动器」。
+
+## 0.5.0
+
+- 架构拆分为共享核心 + 服务适配器：`Supervisor` 只负责端口/进程/就绪/状态，dsh 与 Jupyter 各自实现 `ServiceAdapter`。
+- 新增 Jupyter Lab 托管：uv tool 发现、随机 token、`/api/status` 就绪、`POST /api/shutdown` 优雅停止。
+- 新增 `jupyter kernel add/list/show/use/rename/remove`：注册任意 venv 解释器、改显示名、设默认内核。
+- 新增 `jupyter workdir use/list/current`：工作目录持久化、最近目录、按目录记忆内核。
+- 新增 `config list/get/set/unset/path`：按行编辑 `config.toml`，保留手写注释。
+- 数据布局改为 `services/<id>/state.json|service.log|browser/`，旧单服务文件自动迁移。
+- CLI 改为 `start|stop|restart|open <dsh|jupyter|all>`；`status` / `doctor` 支持多服务与 `--json`。
+- 托盘按服务分组，支持启动/停止全部；每服务独立动作锁，批量操作固定顺序加锁。
+- 跨服务端口排除；Jupyter 不接管手动实例，dsh 保留接管同类实例的行为。
+- 桌面入口新增每个服务的快捷方式；`dsh updates` 保留旧 `updates` 别名。
+- 版本升至 0.5.0。
+
 ## 0.4.0
 
 - 新增 `updates`：检查 dsh 全局安装与 `web` profile 插件的更新，支持 `--json` 与退出码。

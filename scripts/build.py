@@ -1,4 +1,4 @@
-"""构建并部署：PyInstaller 打包 → 同步到 app/（保留 app/.dshlauncher 运行时数据）。
+"""构建并部署：PyInstaller 打包 → 同步到 app/（保留 app/.weblauncher 运行时数据）。
 
 用法：uv run python scripts/build.py [--skip-build]
 """
@@ -16,8 +16,10 @@ ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / ".build" / "dist"
 BUILD = ROOT / ".build" / "work"
 APP = ROOT / "app"
-DATA_NAME = ".dshlauncher"
-APP_NAME = "dshlauncher.exe" if sys.platform == "win32" else "dshlauncher"
+DATA_NAME = ".weblauncher"
+LEGACY_DATA_NAME = ".dshlauncher"
+SAFE_DIRS = {DATA_NAME, LEGACY_DATA_NAME}
+APP_NAME = "weblauncher.exe" if sys.platform == "win32" else "weblauncher"
 ICON = ROOT / "packaging" / "assets" / "app.png"
 
 
@@ -33,7 +35,7 @@ def build() -> None:
             str(DIST),
             "--workpath",
             str(BUILD),
-            str(ROOT / "packaging" / "dshlauncher.spec"),
+            str(ROOT / "packaging" / "weblauncher.spec"),
         ],
         cwd=ROOT,
         check=True,
@@ -41,7 +43,7 @@ def build() -> None:
 
 
 def deploy() -> None:
-    source = DIST / "dshlauncher"
+    source = DIST / "weblauncher"
     if not source.is_dir():
         raise SystemExit(f"没有找到构建产物：{source}")
     APP.mkdir(parents=True, exist_ok=True)
@@ -74,7 +76,7 @@ def _sync(source: Path) -> None:
         target_root = APP / relative
         target_root.mkdir(parents=True, exist_ok=True)
         for name in files:
-            if relative == Path() and name == DATA_NAME:
+            if relative == Path() and name in SAFE_DIRS:
                 continue
             origin = Path(root) / name
             destination = target_root / name
@@ -85,13 +87,13 @@ def _sync(source: Path) -> None:
     # 清理上一版遗留、本次已不存在的文件（数据目录除外）
     for root, dirs, files in os.walk(APP, topdown=False):
         relative = Path(root).relative_to(APP)
-        if relative.parts[:1] == (DATA_NAME,):
+        if relative.parts[:1] and relative.parts[0] in SAFE_DIRS:
             continue
         for name in files:
             if not (source / relative / name).exists():
                 (Path(root) / name).unlink(missing_ok=True)
         for name in dirs:
-            if relative == Path() and name == DATA_NAME:
+            if relative == Path() and name in SAFE_DIRS:
                 continue
             if not (source / relative / name).exists():
                 shutil.rmtree(Path(root) / name, ignore_errors=True)

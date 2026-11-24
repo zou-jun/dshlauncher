@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from dshlauncher.install import windows
+from weblauncher.install import windows
 
 
 def test_create_uses_tray_and_cleans_legacy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -16,6 +16,6 @@ def test_create_uses_tray_and_cleans_legacy(tmp_path: Path, monkeypatch: pytest.
 
     assert windows.create() == []
     script = captured[0]
-    assert "New-Link 'dsh.lnk' 'tray'" in script
+    assert "New-Link 'weblauncher.lnk' 'tray'" in script
     assert "dsh 控制台.lnk" in script
     assert "New-Link 'dsh 控制台.lnk'" not in script

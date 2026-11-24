@@ -6,18 +6,18 @@ from pathlib import Path
 
 import pytest
 
-from dshlauncher.install import linux
+from weblauncher.install import linux
 
 
 def test_entry_runs_tray(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(linux, "applications_dir", lambda: tmp_path)
     monkeypatch.setattr(linux, "_desktop_dirs", lambda: [tmp_path / "desktop"])
     monkeypatch.setattr(linux, "install_icon", lambda icon: None)
-    monkeypatch.setattr(linux, "gui_command", lambda: ["/usr/bin/python3", "-m", "dshlauncher"])
+    monkeypatch.setattr(linux, "gui_command", lambda: ["/usr/bin/python3", "-m", "weblauncher"])
 
     written = linux.create()
-    entry = tmp_path / "dsh.desktop"
+    entry = tmp_path / "weblauncher.desktop"
     assert entry in written
     text = entry.read_text("utf-8")
-    assert "Exec=/usr/bin/python3 -m dshlauncher tray" in text
-    assert "Name=dsh" in text
+    assert "Exec=/usr/bin/python3 -m weblauncher tray" in text
+    assert "Name=dsh web" in text
