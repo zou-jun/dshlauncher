@@ -12,8 +12,8 @@ CREATE_NO_WINDOW = 0x08000000
 #: 主入口：托盘 + 打开默认服务。每个服务再单独建一个快捷方式。
 MAIN_NAME = "weblauncher.lnk"
 SERVICE_LINKS = {
-    "dsh": ("dsh web.lnk", "open dsh"),
-    "jupyter": ("Jupyter Lab.lnk", "open jupyter"),
+    "dsh": ("dsh web.lnk", "ui dsh"),
+    "jupyter": ("Jupyter Lab.lnk", "ui jupyter"),
 }
 
 #: 改名前的旧快捷方式：install / uninstall 都顺手清掉，避免桌面上留两套
@@ -85,7 +85,7 @@ def create(
         lines.append(f"$old=Join-Path $desktop {_ps_quote(name)}")
         lines.append("if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Force }")
 
-    links: dict[str, str] = {MAIN_NAME: "tray"}
+    links: dict[str, str] = {MAIN_NAME: "ui"}
     for service in services:
         entry = SERVICE_LINKS.get(service)
         if entry is not None:

@@ -19,7 +19,7 @@ def test_entry_runs_tray(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     entry = tmp_path / "weblauncher.desktop"
     assert entry in written
     text = entry.read_text("utf-8")
-    assert "Exec=/usr/bin/python3 -m weblauncher tray" in text
+    assert "Exec=/usr/bin/python3 -m weblauncher ui" in text
     assert "Name=Web 服务启动器" in text
 
 

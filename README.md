@@ -1,12 +1,12 @@
 # weblauncher
 
-一个启动器托管多个本地服务：**dsh web** 与 **Jupyter Lab**。每个服务都是独立的分离进程，拥有独立的状态、日志与 Chromium 配置。
+一个启动器托管多个本地服务：**dsh web** 与 **Jupyter Lab**。服务仍是独立的分离进程，所有启动器交互统一进本机 Web 控制台。
 
-- 服务以分离进程运行：关掉终端、关掉窗口都不影响它；只有托盘的「退出并停止全部服务」会显式停掉
-- 双击进入系统托盘：菜单按服务分组，可单独启动/打开/停止/重启、看日志
-- dsh 启动慢时先开本地过场页；Jupyter 启动前自动选空闲端口并生成 token
+- **Web 控制台**：服务启停/打开、日志、配置、doctor、Jupyter 内核与工作目录、dsh 更新、桌面入口、退出全部在 `127.0.0.1` 随机端口
+- 双击 exe / 桌面快捷方式打开控制台；托盘只保留「打开控制台 / 退出」入口，不再有原生命令菜单
+- 服务以分离进程运行：关掉终端、关掉窗口都不影响它；控制台里可显式停止全部
 - Jupyter 的工作目录、默认内核按目录记忆；内核可直接注册任意 uv 项目 venv
-- 新服务 = `services/<id>/` 适配器 + 注册表一行，核心/托盘/CLI 不改
+- 新服务 = `services/<id>/` 适配器 + 注册表一行，控制台/CLI 自动获得入口
 - Windows 完整支持；Linux 完整支持（X11 / XWayland，见「平台差异」）；macOS 尽力而为
 
 ## 安装
@@ -19,14 +19,15 @@
 
 | 启动方式 | 行为 |
 |---|---|
-| 双击 exe / 桌面快捷方式 | 等同 `tray`：确保服务在跑、打开窗口，并常驻系统托盘 |
+| 双击 exe / 桌面快捷方式 | 等同 `ui`：确保 Agent 在跑、打开 Web 控制台，并常驻托盘 |
 | 终端里带参数 | CLI：自动接管父控制台，`doctor`、`status` 等输出直接显示 |
 | `.weblauncher/` | 首次运行自动生成的运行时数据（exe 同级） |
 
 ```bat
 weblauncher.exe doctor         :: 自检：依赖、路径、端口
 weblauncher.exe install        :: 在桌面创建主入口 + 每服务快捷方式
-weblauncher.exe                :: 打开窗口并驻留托盘
+weblauncher.exe                :: 打开 Web 控制台并驻留 Agent
+weblauncher.exe ui             :: 显式打开控制台
 weblauncher.exe open dsh       :: 只打开/置前 dsh 窗口，不驻留托盘
 ```
 
@@ -40,7 +41,7 @@ weblauncher.exe open dsh       :: 只打开/置前 dsh 窗口，不驻留托盘
 ```bash
 ./weblauncher doctor        # 自检：会话类型、依赖、窗口控制能力、端口
 ./weblauncher install       # 写入 ~/.local/share/applications 与图标
-./weblauncher               # 打开窗口并驻留托盘
+./weblauncher               # 打开 Web 控制台并驻留 Agent
 ```
 
 `install` 只写应用菜单（GNOME 默认不显示桌面图标），不会碰 `~/Desktop`。
@@ -54,7 +55,7 @@ weblauncher.exe open dsh       :: 只打开/置前 dsh 窗口，不驻留托盘
 ```bash
 uv sync
 uv run python -m weblauncher doctor
-uv run python -m weblauncher          # 前台运行托盘（Ctrl+C 退出并停服务）
+uv run python -m weblauncher          # 前台运行 Agent 并打开控制台（Ctrl+C 退出并停服务）
 uv run python -m weblauncher open dsh
 ```
 
@@ -62,7 +63,8 @@ uv run python -m weblauncher open dsh
 
 | 命令 | 作用 |
 |---|---|
-| `tray`（默认 / 双击） | 前台运行系统托盘：按服务启动/打开，Ctrl+C 退出并停全部服务 |
+| `ui`（默认 / 双击） | 确保 Agent 在跑，打开 Web 控制台 |
+| `tray` | 兼容入口；等同启动 Agent，交互以 Web 控制台为准 |
 | `start / stop / restart / open <dsh\|jupyter\|all>` | 只操作服务；已在跑时 `start` 直接复用；`restart` 让配置变更生效 |
 | `status [dsh\|jupyter\|all]` | PID、端口、URL、root_dir/内核；`--json` 输出结构化状态 |
 | `doctor [dsh\|jupyter\|all]` | 依赖发现、平台后端、托盘、端口占用、每个服务的依赖；`--json` |
@@ -70,30 +72,33 @@ uv run python -m weblauncher open dsh
 | `jupyter kernel add / list / show / use / rename / remove` | 注册/命名/选择 Python 内核 |
 | `jupyter workdir use / list / current` | 选择 Jupyter 工作目录并记住 |
 | `dsh updates`（旧入口 `updates`） | 检查 dsh 与 `web` profile 插件更新；`--json` / `--panel` |
-| `install / uninstall` | 创建 / 删除桌面入口（主托盘 + 每个服务） |
+| `install / uninstall` | 创建 / 删除桌面入口（主控制台 + 每个服务详情） |
 | `version` | 版本号 |
 
 通用参数：`--host --port --browser --ozone --profile-dir --no-dedupe --start-timeout`。
 dsh 额外接受 `--cwd --node --dsh-bin`；Jupyter 额外接受 `--root --kernel --jupyter-bin --base-url`。
-`dsh updates` 额外接受 `--json` / `--panel` / `--profile` / `--timeout`。
+`dsh updates` 额外接受 `--json` / `--panel` / `--profile` / `--timeout`；`--panel` 现在打开控制台 `/updates`。
 
-### 托盘菜单
+### Web 控制台
 
-| 菜单项 | 作用 |
+| 页面 | 作用 |
 |---|---|
-| dsh web / Jupyter Lab 子菜单 | 每个服务都有：打开、状态、启动、停止、重启、查看日志、打开数据目录 |
-| 启动全部 / 停止全部 | 按服务 id 顺序加锁，避免交叉操作 |
-| 刷新状态 | 重新读取状态并刷新菜单（外部 `start` / `stop` 后手动点一下） |
-| 检查更新… | 仅 dsh：打开本地更新面板 |
-| 退出（服务继续） | 只移除托盘图标 |
-| 退出并停止全部服务 | 先停所有服务，再移除图标；窗口保留 |
+| 总览 | 所有服务状态、PID/端口、启动/停止/重启/打开、启动全部/停止全部、最近任务 |
+| 服务详情 | 实时状态、脱敏 URL、工作目录、日志、诊断、打开数据目录、强制停止 |
+| 更新 | dsh 与插件版本、可更新项、升级进度与实时日志；支持 profile/timeout |
+| Jupyter | 内核注册/查看/设为默认/改名/删除；工作目录与按目录内核记忆 |
+| 设置 | `[launcher] [ui] [dsh] [jupyter]` 常用表单 + 保留注释的高级 TOML 编辑器 |
+| 诊断 | 平台、浏览器、依赖、端口占用、运行时路径；可复制 JSON |
+| 关于 | 版本/路径、安装/删除桌面入口、退出控制台（可同时停服务） |
+
+托盘菜单只保留打开控制台和退出；控制台使用独立 Chromium profile，关闭控制台窗口不会停止服务。
 
 ## 检查与升级更新
 
 ```bash
 weblauncher updates                 # 文本报告；有更新退出码 1
 weblauncher updates --json          # 脚本消费
-weblauncher updates --panel         # 打开面板，终端 Ctrl+C 结束
+weblauncher updates --panel         # 打开控制台 /updates
 weblauncher updates --profile dsh-tui --timeout 60
 ```
 
@@ -106,18 +111,16 @@ weblauncher updates --profile dsh-tui --timeout 60
   升级 dsh 使用识别到的全局包管理器（npm / pnpm），插件通过
   `dsh plugin --profile <name> add <包>@<版本> --save-exact`，沿用 dsh 的兼容性预检。
 - **前置条件**：文本检查需要 npm 或 pnpm；dsh 升级还需要能识别 dsh 所属的全局包管理器。
-  用 `--dsh-bin` / `WEBLAUNCHER_DSH_BIN` 显式指定 dsh 路径时，不自动升级 dsh，面板会提示手动处理。
-- **面板**：只监听 `127.0.0.1` 的随机端口，URL 带随机 token；POST 升级还要校验 token 与 Host。
-  面板使用独立的 `panel-browser/` Chromium 配置，不会劫持 dsh 应用窗口。
-  托盘里的面板随托盘进程存活；`updates --panel` 的面板随该终端进程存活。
+  用 `--dsh-bin` / `WEBLAUNCHER_DSH_BIN` 显式指定 dsh 路径时，不自动升级 dsh，控制台会提示手动处理。
+- **控制台**：只监听 `127.0.0.1` 的随机端口；一次性 bootstrap ticket 设置 HttpOnly 会话 Cookie，写操作还校验 CSRF、Host 与 Origin。控制台使用独立的 `control-browser/` Chromium 配置。
+  更新任务随 Agent 存活；`updates --panel` 会打开控制台 `/updates`。
 - **非 registry 依赖**：`file:` / `link:` / `git+` / GitHub 简写 / tarball / `npm:` 别名不猜测更新，
-  在面板里标记为跳过。
+  在控制台里标记为跳过。
 - **无法比较或安装失败**：报告会保留具体版本和命令输出；dsh 升级失败会跳过后续插件，
   单个插件失败不阻断其它插件，服务仍会尝试恢复运行。
 - **升级日志**：完整命令输出追加到 `.weblauncher/upgrades.log`（超过 1 MB 轮转 `.1`）；
-  面板实时日志只保留最后 600 行，避免大量 peer 警告把结尾挤掉。
-- **升级后的 dsh 窗口**：服务重启会换 token，旧应用窗口可能显示 401；关掉窗口后从托盘
-  「打开窗口」重新打开即可。更新面板使用独立配置，不受影响。
+  控制台实时日志只保留最后 600 行，避免大量 peer 警告把结尾挤掉。
+- **升级后的 dsh 窗口**：服务重启会换 token，旧应用窗口可能显示 401；关掉窗口后从控制台总览点「打开」即可。控制台使用独立配置，不受影响。
 
 退出码：`0` 无更新；`1` 有更新；`2` 检查失败（至少一项完全无法检查）。
 
@@ -136,8 +139,8 @@ weblauncher updates --profile dsh-tui --timeout 60
 | `config.toml` | 手写/`config set` 的运行参数（`[launcher] [ui] [dsh] [jupyter]`） |
 | `launcher.log` | 启动器动作审计；超过 1 MB 轮转为 `.1` |
 | `upgrades.log` | dsh 升级任务完整日志 |
-| `panel-browser/` | 更新面板的独立浏览器配置 |
-| `tray.lock` / `tray.json` | 托盘单实例锁与 loopback IPC 端口/随机 token |
+| `control-browser/` | Web 控制台的独立 Chromium 配置 |
+| `tray.lock` / `tray.json` | Agent 单实例锁与 loopback IPC 端口/随机 token |
 
 旧版单服务布局（根目录 `state.json` / `dsh-web.log` / `browser/`）会在首次运行时自动搬进 `services/dsh/`；旧品牌数据目录 `.dshlauncher/` 也会在首次启动时整体改名为 `.weblauncher/`。
 
@@ -300,12 +303,14 @@ weblauncher open dsh --ozone x11
 src/weblauncher/
   paths.py config.py memory.py     共享：数据目录、配置、选择记忆
   ports.py process.py supervisor.py 共享：端口、进程树、生命周期
-  discovery.py browser.py splash.py 共享：浏览器窗口
+  discovery.py browser.py          浏览器窗口与一次性 ticket
+  control/                         Web 控制台后端：认证、API、任务、静态资源
+  webui/static/                    无构建 SPA（HTML/CSS/ES modules）
   services/base.py                 服务适配器契约
   services/registry.py             服务注册表（唯一出现服务名的地方）
-  services/dsh/                    dsh 适配器、更新/升级/面板
+  services/dsh/                    dsh 适配器、更新/升级
   services/jupyter/                Jupyter 适配器、内核、工作目录
-  tray/ install/ platform/         托盘、桌面入口、平台后端
+  tray/ install/ platform/         Agent 托盘、桌面入口、平台后端
 docs/                     架构说明
 tests/                    纯逻辑单测
 packaging/                PyInstaller 入口、spec、应用图标
@@ -336,7 +341,7 @@ make build      # 打包并部署到 app/
 ```
 
 其余目标见 `make help`：`format`、`test ARGS="-k port"`、`start` / `stop` / `restart` /
-`status` / `doctor` / `tray` / `open`、`jupyter`、`deploy`、`clean`、`distclean`。
+`status` / `doctor` / `ui` / `tray` / `open`、`jupyter`、`deploy`、`clean`、`distclean`。
 服务选择用 `SERVICE=dsh|jupyter|all`，例如 `make start SERVICE=jupyter`。
 
 Windows 上用 MSYS2 自带的 make：`pacman -S make`，再把 `C:\msys64\usr\bin` **追加**到用户 `PATH`
@@ -363,7 +368,7 @@ make deploy         # 只重新部署（复用上次构建）
 必须在目标平台上各自构建（PyInstaller 不交叉编译）；`app/` 是部署目录，`app/.weblauncher/`
 的数据不会被构建清理。
 
-> 部署前先退出托盘（右键 → 退出并停止服务）、关掉应用窗口：窗口打开时 `_internal` 里的 DLL 被占用，
+> 部署前先在控制台「关于」退出并停止服务）、关掉应用窗口：窗口打开时 `_internal` 里的 DLL 被占用，
 > 覆盖会失败（脚本会给出这条提示）。
 
 ## 测试与检查
@@ -374,15 +379,14 @@ uv run ruff check .      # lint
 uv run ruff format .     # 格式化
 ```
 
-只覆盖纯逻辑：token/URL、窗口几何、配置/记忆优先级、依赖发现、kernelspec 注册与删除、Jupyter HTTP 就绪/关闭、跨服务端口排除、托盘单实例/IPC/编排、状态快照、JSON 输出与安装器。
+只覆盖纯逻辑：token/URL、窗口几何、配置/记忆优先级、依赖发现、kernelspec 注册与删除、Jupyter HTTP 就绪/关闭、跨服务端口排除、Agent 单实例/IPC、控制台认证/API/任务、状态快照、JSON 输出与安装器。
 
 ## 故障排查
 
-- **窗口里是 401 / Jupyter 提示 token 失效**：服务重启过而窗口还拿着旧 token —— 关掉窗口，再点托盘「打开窗口」或重新双击；Jupyter 的 token 默认每次启动都换。
+- **窗口里是 401 / Jupyter 提示 token 失效**：服务重启过而窗口还拿着旧 token —— 关掉窗口，再到控制台总览点「打开」；Jupyter 的 token 默认每次启动都换。
 - **双击后托盘区看不到图标**：Windows 11 默认把新图标收进溢出区，点任务栏的 `^` 固定一次即可；
   Linux 需要桌面提供 AppIndicator / GTK / X11 后端，`doctor` 的「托盘」与「托盘进程」行会给出后端、PID 与 IPC 端口。
-- **托盘菜单里的状态没跟着变**：菜单标签只在托盘动作完成后刷新；外部 `start` / `stop` 之后点「刷新状态」即可。
-  「服务状态」弹窗每次点击都重新读取；tooltip 每 2 秒自动更新。
+- **控制台状态没跟着变**：总览每 2.5 秒刷新；服务详情可点「刷新」。外部 CLI 操作后刷新页面即可。
 - **终端里中文乱码**：输出编码跟随控制台代码页——936（GBK）控制台保持默认编码，65001 才用 UTF-8；显式设置 `PYTHONIOENCODING` / `PYTHONUTF8` 时以你的设置为准。PowerShell 5.1 默认 936，想让会话统一 UTF-8 可在 `$PROFILE` 里设 `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)`。
 - **端口被占或被系统保留**：`doctor` 的「<服务> · 端口」行会区分 `被占用` / `系统保留（区间）`，占用时还会打印占用者的 pid 与命令行。默认端口会自动回退；显式 `--port` 撞上保留段会直接报错并给出可换端口，`netsh interface ipv4 show excludedportrange protocol=tcp` 可查看全部保留段。
 - **`dsh` 升级后行为不对**：`weblauncher restart dsh`。

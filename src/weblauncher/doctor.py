@@ -71,7 +71,7 @@ def report(
         ("会话", _session_text()),
         ("窗口控制", _window_control_text(runtime.backend, runtime.config.ui.ozone)),
         ("托盘", _tray_text()),
-        ("托盘进程", _tray_process_text(runtime.paths)),
+        ("控制台 Agent", _tray_process_text(runtime.paths)),
         ("Python", f"{sys.version.split()[0]}  {sys.executable}"),
         ("数据目录", str(runtime.paths.data)),
         (

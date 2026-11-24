@@ -20,8 +20,6 @@ class ServiceSpec:
     fallback_ports: tuple[int, ...] = ()
     #: 端口上是同类进程时是否接管（dsh=True；jupyter 不动别人的实例）。
     takeover: bool = False
-    #: 启动慢的服务先开本地过场页；jupyter 启动快，可关。
-    use_splash: bool = True
     #: 没有可信 state 时是否允许按端口扫描并停止（只对 dsh 开启）。
     stop_untracked: bool = False
     supports_updates: bool = False

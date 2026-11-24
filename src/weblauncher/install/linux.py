@@ -17,8 +17,8 @@ from .. import paths
 
 MAIN_NAME = "weblauncher.desktop"
 SERVICE_ENTRIES = {
-    "dsh": ("dsh web", "open dsh"),
-    "jupyter": ("Jupyter Lab", "open jupyter"),
+    "dsh": ("dsh web", "ui dsh"),
+    "jupyter": ("Jupyter Lab", "ui jupyter"),
 }
 ICON_NAME = "weblauncher"
 ICON_SIZE = 256
@@ -111,10 +111,8 @@ def create(
     applications.mkdir(parents=True, exist_ok=True)
     installed_icon = install_icon(icon)
 
-    entries: dict[str, tuple[str, str]] = {MAIN_NAME: ("Web 服务启动器", "tray")}
+    entries: dict[str, tuple[str, str]] = {MAIN_NAME: ("Web 服务启动器", "ui")}
     for service in services:
-        if service == "dsh":
-            continue
         label_action = SERVICE_ENTRIES.get(service)
         if label_action is not None:
             entries[f"{service}.desktop"] = label_action

@@ -15,7 +15,7 @@ ARGS ?=
 SERVICE ?= all
 
 .DEFAULT_GOAL := help
-.PHONY: help env lint format fmt-check test check open start stop restart status doctor updates jupyter tray smoke build deploy clean distclean
+.PHONY: help env lint format fmt-check test check open start stop restart status doctor updates jupyter ui tray smoke build deploy clean distclean
 
 help:  ## 列出全部目标
 	@$(PY) -c "import pathlib,re;[print(f'  {m[1]:<10}{m[2]}') for m in (re.match(r'^([a-z][a-z-]*):.*?##\s*(.+)', l.rstrip()) for l in pathlib.Path('Makefile').read_text('utf-8').splitlines()) if m]"
@@ -64,7 +64,10 @@ updates:  ## 检查 dsh / 插件更新；ARGS="--json" 或 ARGS="--panel"
 jupyter:  ## 打开 Jupyter Lab（必要时启动服务）
 	@$(CLI) open jupyter
 
-tray:  ## 前台运行系统托盘（双击 exe 的等价形态，Ctrl+C 退出）
+ui:  ## 打开 Web 控制台（必要时启动 Agent）
+	@$(CLI) ui
+
+tray:  ## 前台运行 Agent（兼容入口，Ctrl+C 退出）
 	@$(CLI) tray
 
 smoke:  ## 真机冒烟：start all → status all → stop all

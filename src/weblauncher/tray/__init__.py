@@ -1,15 +1,14 @@
-"""系统托盘：双击后的常驻入口。
+"""常驻托盘入口。
 
-- ``run``：有托盘就投递打开窗口，没有就自己成为托盘；
-- ``single``：pid + create_time 单实例锁；
-- ``ipc``：loopback + token 的本地请求；
-- ``controller``：动作与并发状态（不依赖 pystray）；
-- ``app``：pystray 图标/菜单与线程调度。
+业务命令已经迁到 Web 控制台；``tray`` 只保留最小图标、单实例 IPC 和
+控制台启动入口。``app`` 里的符号按需导入，避免 ``control`` 与 ``tray``
+在包初始化阶段互相循环依赖。
 """
 
 from __future__ import annotations
 
-from .app import ICON_SIZE, TITLE, TrayApp, icon_image, run
+from typing import TYPE_CHECKING, Any
+
 from .controller import TrayController, state_text, status_text
 from .ipc import (
     INFO_NAME,
@@ -22,8 +21,12 @@ from .ipc import (
     _write_info,
     running,
     send_open,
+    send_ui,
 )
 from .single import LOCK_NAME, Lock, acquire_lock, release_lock
+
+if TYPE_CHECKING:
+    from .app import ICON_SIZE, TITLE, TrayApp, icon_image, open_console_url, run
 
 __all__ = [
     "ICON_SIZE",
@@ -42,10 +45,22 @@ __all__ = [
     "_write_info",
     "acquire_lock",
     "icon_image",
+    "open_console_url",
     "release_lock",
     "run",
     "running",
     "send_open",
+    "send_ui",
     "state_text",
     "status_text",
 ]
+
+_APP_SYMBOLS = {"ICON_SIZE", "TITLE", "TrayApp", "icon_image", "open_console_url", "run"}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _APP_SYMBOLS:
+        from . import app as app_module
+
+        return getattr(app_module, name)
+    raise AttributeError(name)

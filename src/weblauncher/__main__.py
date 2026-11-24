@@ -11,6 +11,7 @@ import traceback
 import unicodedata
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from . import __version__, actions, config, doctor, install, logs, memory, paths, platform, tray
 from .context import Runtime, ServiceContext
@@ -253,6 +254,13 @@ def _cmd_tray(args: argparse.Namespace) -> int:
     return tray.run(_runtime())
 
 
+def _cmd_ui(args: argparse.Namespace) -> int:
+    target = "/#/"
+    if getattr(args, "service", None):
+        target = f"/#/services/{args.service}"
+    return tray.run(_runtime(), target=target)
+
+
 def _cmd_install(args: argparse.Namespace) -> int:
     created = install.create(
         Path(args.icon).expanduser() if args.icon else None,
@@ -322,15 +330,22 @@ def _dsh_context(args: argparse.Namespace) -> ServiceContext:
 
 
 def _cmd_dsh_updates(args: argparse.Namespace) -> int:
-    from .services.dsh import panel, updates
+    from .services.dsh import updates
 
-    context = _dsh_context(args)
+    runtime = _runtime()
+    context = runtime.context("dsh", _dsh_options(args))
     if args.panel:
+        target = f"/#/updates?profile={quote(args.profile)}&timeout={quote(str(args.timeout))}"
         try:
-            return panel.run(context, profile=args.profile, timeout=args.timeout)
-        except Exception as exc:  # noqa: BLE001 - GUI 启动失败要有明确出口
-            _report_error(exc)
-            return 1
+            url = tray.send_ui(
+                runtime.paths,
+                timeout=5.0,
+                target=target,
+            )
+        except tray.TrayUnavailable:
+            return tray.run(runtime, target=target)
+        tray.open_console_url(runtime, url)
+        return 0
     report = updates.check(context.settings, profile=args.profile, timeout=args.timeout)
     if args.json:
         _emit(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))
@@ -567,8 +582,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command")
 
-    tray_parser = sub.add_parser("tray", help="常驻系统托盘（双击 exe 的默认行为）")
+    tray_parser = sub.add_parser("tray", help="常驻控制台 Agent（兼容入口）")
     tray_parser.set_defaults(handler=_cmd_tray)
+
+    ui_parser = sub.add_parser("ui", help="打开 Web 控制台（双击 exe 的默认行为）")
+    ui_parser.add_argument("service", nargs="?", help="可选：打开某个服务详情")
+    ui_parser.set_defaults(handler=_cmd_ui)
 
     for name, help_text in (
         ("start", "启动一个服务（dsh / jupyter / all）"),
@@ -701,7 +720,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command is None:
-        args = parser.parse_args(["tray"])
+        args = parser.parse_args(["ui"])
     try:
         return args.handler(args)
     except Exception as exc:  # noqa: BLE001 - 统一转成提示 + 退出码

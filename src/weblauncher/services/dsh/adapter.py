@@ -23,7 +23,6 @@ class DshAdapter:
         default_port=3080,
         fallback_ports=ports.FALLBACK_PORTS,
         takeover=True,
-        use_splash=True,
         stop_untracked=True,
         supports_updates=True,
         auto_start=True,

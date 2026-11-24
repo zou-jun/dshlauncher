@@ -15,7 +15,7 @@ from ...services.base import LaunchPlan, ServiceSpec
 from .discovery import Install
 from .settings import Settings
 
-#: 端口冲突时不接管、自动换端口；启动快，不需要过场页。
+#: 端口冲突时不接管、自动换端口。
 FALLBACK_PORTS = (8889, 8890, 8891, 18888, 18889)
 
 #: Jupyter 只监听 loopback；不能把 token 交给 HTTP(S)_PROXY。
@@ -40,7 +40,6 @@ class JupyterAdapter:
         default_port=8888,
         fallback_ports=FALLBACK_PORTS,
         takeover=False,
-        use_splash=False,
         stop_untracked=False,
         supports_updates=False,
         auto_start=False,

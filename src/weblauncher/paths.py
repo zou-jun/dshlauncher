@@ -250,9 +250,9 @@ class Paths:
         return self.service("dsh").profile
 
     @property
-    def panel_profile(self) -> Path:
-        """更新面板使用独立 Chromium 配置，避免和 dsh 应用窗口抢同一实例。"""
-        return self.data / "panel-browser"
+    def control_profile(self) -> Path:
+        """控制台使用独立 Chromium 配置，避免和普通浏览器扩展共用会话。"""
+        return self.data / "control-browser"
 
     @property
     def config(self) -> Path:

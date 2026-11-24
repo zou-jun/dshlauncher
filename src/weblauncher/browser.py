@@ -109,7 +109,7 @@ def launch(
 ) -> str:
     """打开应用窗口；已有窗口时只置前。返回 ``new`` 或 ``focused``。
 
-    ``dedupe=False`` 强制新开（启动过场页用）。原生 Wayland（``ozone=auto`` /
+    ``dedupe=False`` 强制新开。原生 Wayland（``ozone=auto`` /
     ``wayland``）没有可用的窗口控制 API，dedupe 与尺寸纠正在该模式下不生效，
     只能每次都新开窗口。
     """

@@ -18,7 +18,7 @@ def gui_command() -> list[str]:
 def create(
     icon: Path | None = None, *, services: tuple[str, ...] | list[str] = ("dsh", "jupyter")
 ) -> list[Path]:
-    command = " ".join([*gui_command(), "tray"])
+    command = " ".join([*gui_command(), "ui"])
     raise RuntimeError(
         "macOS / 其它 POSIX 暂不支持自动创建桌面入口；"
         f"请手动运行 `{command}`，或在 Finder 里为可执行文件创建别名。"

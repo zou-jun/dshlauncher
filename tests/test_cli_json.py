@@ -68,15 +68,17 @@ def test_updates_json_up_to_date(monkeypatch: pytest.MonkeyPatch, capsys: pytest
     assert payload["update_count"] == 0
 
 
-def test_updates_panel_delegates_options(monkeypatch: pytest.MonkeyPatch) -> None:
-    from weblauncher.services.dsh import panel as updates_panel
+def test_updates_panel_opens_control_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    from weblauncher import tray
 
     calls: dict = {}
 
-    def fake_run(context, *, profile: str, timeout: float) -> int:
-        calls.update(profile=profile, timeout=timeout)
-        return 0
+    def fake_send(paths_, timeout: float, *, target: str = "/#/") -> str:
+        calls["target"] = target
+        return "http://127.0.0.1:1/boot/ticket"
 
-    monkeypatch.setattr(updates_panel, "run", fake_run)
+    monkeypatch.setattr(tray, "send_ui", fake_send)
+    monkeypatch.setattr(tray, "open_console_url", lambda runtime, url: calls.setdefault("url", url) or "new")
     assert cli.main(["updates", "--panel", "--profile", "dsh-tui", "--timeout", "5"]) == 0
-    assert calls == {"profile": "dsh-tui", "timeout": 5.0}
+    assert calls["target"] == "/#/updates?profile=dsh-tui&timeout=5.0"
+    assert calls["url"].endswith("/boot/ticket")

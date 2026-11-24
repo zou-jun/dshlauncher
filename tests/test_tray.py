@@ -1,10 +1,9 @@
-"""托盘单实例、IPC 与多服务菜单（不创建真实图标/窗口）。"""
+"""Agent 单实例、IPC 与控制器（不创建真实图标/窗口）。"""
 
 from __future__ import annotations
 
 import json
 import os
-import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -155,125 +154,3 @@ def test_quit_still_stops_icon_when_service_stop_fails(
     app.icon = FakeIcon()
     app._stop_and_quit()
     assert events == ["notify", "icon"]
-
-
-def test_show_details_opens_dialog(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[str, str]] = []
-    backend = SimpleNamespace(message=lambda title, text, **kwargs: calls.append((title, text)))
-    app = _app(data_dir, backend)
-    controller = app.controllers["dsh"]
-    monkeypatch.setattr(controller, "describe", lambda: "服务: 运行中\nPID : 1")
-    app._details(controller)(None, None)
-    assert calls == [(f"{tray.TITLE} · dsh web", "服务: 运行中\nPID : 1")]
-    assert app._details_lock.acquire(blocking=False)
-
-
-def test_show_details_reports_describe_failure(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[str, str]] = []
-    backend = SimpleNamespace(message=lambda title, text, **kwargs: calls.append((title, text)))
-    app = _app(data_dir, backend)
-    controller = app.controllers["dsh"]
-
-    def boom() -> str:
-        raise RuntimeError("no state")
-
-    monkeypatch.setattr(controller, "describe", boom)
-    app._details(controller)(None, None)
-    assert calls and calls[0][1].startswith("读取状态失败")
-    assert app._details_lock.acquire(blocking=False)
-
-
-def test_show_details_notifies_when_dialog_fails(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    notified: list[str] = []
-
-    def boom(title: str, text: str, **kwargs: object) -> None:
-        raise RuntimeError("no dialog")
-
-    app = _app(data_dir, SimpleNamespace(message=boom))
-    controller = app.controllers["dsh"]
-    monkeypatch.setattr(controller, "describe", lambda: "服务: 未运行")
-    monkeypatch.setattr(app, "_notify", lambda text: notified.append(text))
-    app._details(controller)(None, None)
-    assert notified and "打开状态窗口失败" in notified[0]
-    assert app._details_lock.acquire(blocking=False)
-
-
-def test_schedule_refresh_coalesces(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    app = _app(data_dir)
-    calls: list[bool] = []
-    monkeypatch.setattr(app, "_refresh", lambda: calls.append(True))
-    app._schedule_refresh()
-    app._schedule_refresh()
-    time.sleep(0.3)
-    assert calls == [True]
-
-
-def test_controller_reports_starting(data_dir: Path) -> None:
-    runtime = _runtime(data_dir, SimpleNamespace())
-    controller = tray.TrayController(runtime.context("dsh"))
-    controller._starting.set()
-    assert controller.status_short() == "启动中"
-    assert controller.status_tooltip() == "正在启动服务…"
-    controller._starting.clear()
-    assert controller.status_short() == "未运行"
-
-
-def test_show_panel_reuses_server_and_releases_lock(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from weblauncher.tray import app as tray_app
-
-    app = _app(data_dir)
-    created: list[object] = []
-
-    class FakePanel:
-        url = "http://127.0.0.1:1/token/"
-
-        def __init__(self, context: object, *, exclusive: object = None) -> None:
-            created.append(self)
-
-        def start(self) -> None:
-            pass
-
-        def open_window(self) -> str:
-            return "new"
-
-    monkeypatch.setattr(tray_app.dsh_panel, "PanelServer", FakePanel)
-    app._panel_lock.acquire()
-    app._show_panel()
-    assert len(created) == 1
-    assert app.panel is created[0]
-    assert app._panel_lock.acquire(blocking=False)
-    app._panel_lock.release()
-
-
-def test_exclusive_rejects_busy_controller(data_dir: Path) -> None:
-    from weblauncher.services.dsh.upgrade import BusyError
-
-    app = _app(data_dir)
-    controller = app.controllers["dsh"]
-    controller._busy.acquire()
-    try:
-        with pytest.raises(BusyError):
-            app._exclusive(lambda: None)
-    finally:
-        controller._busy.release()
-
-
-def test_exclusive_releases_controller_after_work(data_dir: Path) -> None:
-    app = _app(data_dir)
-    controller = app.controllers["dsh"]
-    calls: list[str] = []
-    app._exclusive(lambda: calls.append("work"))
-    assert calls == ["work"]
-    assert controller._busy.acquire(blocking=False)
-    controller._busy.release()
-
-
-def test_open_log_creates_service_directory(tmp_path: Path) -> None:
-    opened: list[Path] = []
-    backend = SimpleNamespace(open_path=lambda path: opened.append(path))
-    app = _app(tmp_path, backend)
-    controller = app.controllers["dsh"]
-    controller.open_log()
-    log = paths.Paths(tmp_path).service("dsh").log
-    assert log.is_file()
-    assert opened == [log]

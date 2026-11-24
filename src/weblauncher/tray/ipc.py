@@ -74,19 +74,28 @@ def _request(info: dict[str, Any], command: str, timeout: float) -> str:
     return str(reply.get("result") or "")
 
 
-def send_open(paths_: Paths, timeout: float, *, wait: float = 0.0) -> str:
-    """让托盘打开窗口；``wait`` 内反复重试等待托盘就绪。"""
+def _send(paths_: Paths, command: str, timeout: float, *, wait: float = 0.0) -> str:
     deadline = time.monotonic() + wait
     while True:
         info = _read_info(paths_)
         if info is not None and alive(int(info["pid"]), float(info["create_time"])):
             try:
-                return _request(info, "open", timeout)
+                return _request(info, command, timeout)
             except (OSError, ValueError):
-                pass  # 托盘正在启动/退出，短暂重试
+                pass  # Agent 正在启动/退出，短暂重试
         if time.monotonic() >= deadline:
-            raise TrayUnavailable("没有运行中的托盘")
+            raise TrayUnavailable("没有运行中的控制台")
         time.sleep(0.2)
+
+
+def send_open(paths_: Paths, timeout: float, *, wait: float = 0.0) -> str:
+    """让常驻 Agent 打开服务窗口；``wait`` 内反复重试等待就绪。"""
+    return _send(paths_, "open", timeout, wait=wait)
+
+
+def send_ui(paths_: Paths, timeout: float, *, wait: float = 0.0, target: str = "/#/") -> str:
+    """请求一个一次性控制台入口 URL。"""
+    return _send(paths_, f"ui {target}".strip(), timeout, wait=wait)
 
 
 class IpcServer:

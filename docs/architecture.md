@@ -2,19 +2,23 @@
 
 ## 进程模型
 
-- **启动器进程**：CLI 短命；托盘常驻。两者通过 `Runtime` 读取同一份配置/记忆。
+- **常驻 Agent**：托盘图标只是入口；Agent 内运行控制台 HTTP 服务、动作任务、升级任务与服务控制器。
+- **CLI**：短命；通过 `Runtime` 读取同一份配置/记忆，直接调用服务层；`ui` 只负责打开控制台。
 - **被托管服务**：每个服务是一个独立分离进程（dsh = node，Jupyter = uv tool 的 python），
-  关闭终端/托盘不影响；托盘退出可选择保留或停止。
-- **浏览器窗口**：每个服务独立的 Chromium `--user-data-dir`，dedupe 只在自己 profile 内生效。
+  关闭终端/控制台窗口不影响；Agent 退出可选择保留或停止。
+- **浏览器窗口**：控制台使用独立 `control-browser/` profile；每个服务仍使用自己的 Chromium `--user-data-dir`。
 
 ```mermaid
 flowchart TB
-  Entry[__main__.py] --> CLI[全局命令 / 服务命令]
-  Entry --> Tray[tray.app]
-  CLI --> Reg[services.registry]
-  Tray --> Ctx[ServiceContext]
-  Reg --> Ctx
-  Ctx --> Sup[Supervisor]
+  Entry[__main__.py] --> CLI[CLI / ui]
+  Entry --> Agent[tray.app 常驻 Agent]
+  Agent --> Web[control.server]
+  Web --> Backend[control.backend]
+  Web --> Static[webui/static SPA]
+  Backend --> Ctx[ServiceContext]
+  CLI --> Ctx
+  Ctx --> Reg[services.registry]
+  Reg --> Sup[Supervisor]
   Sup --> Adapter[services/base.ServiceAdapter]
   Adapter --> Dsh[services/dsh]
   Adapter --> Jup[services/jupyter]
@@ -23,7 +27,7 @@ flowchart TB
   Sup --> Proc[process.py]
   Sup --> Logs[logs.py]
   Sup --> Status[status.py]
-  Tray --> Locks[single / ipc / per-service locks]
+  Agent --> Locks[single / ipc / per-service locks]
 ```
 
 ## 分层与模块
@@ -37,13 +41,15 @@ flowchart TB
 | 共享 | `process.py` | 分离启动、进程树终止、pid + create_time |
 | 共享 | `supervisor.py` | 通用生命周期：端口规划 → spawn → 就绪 → 状态 → 停止 |
 | 共享 | `state.py` / `logs.py` / `status.py` | 状态文件、日志尾部/轮转、展示快照 |
-| 共享 | `discovery.py` / `browser.py` / `splash.py` | Chromium 发现、应用窗口、慢启动过场页 |
+| 共享 | `discovery.py` / `browser.py` | Chromium 发现、应用窗口、一次性 ticket |
 | 服务层 | `services/base.py` | `ServiceSpec` / `LaunchPlan` / `ServiceAdapter` 协议 |
 | 服务层 | `services/registry.py` | 服务 id 列表、`all`/逗号解析、按 id 组装 settings + adapter |
-| 服务层 | `services/dsh/` | node/bin.js 发现、token URL 解析、接管端口、updates/upgrade/panel |
+| 服务层 | `services/dsh/` | node/bin.js 发现、token URL 解析、接管端口、updates/upgrade |
 | 服务层 | `services/jupyter/` | uv tool 发现、HTTP 就绪/关闭、kernelspec 注册、工作目录记忆 |
-| UI | `tray/` | 多服务菜单、每服务锁、单实例/IPC、更新面板入口 |
-| UI | `install/` | 主托盘入口 + 每服务快捷方式（Windows `.lnk` / Linux `.desktop`） |
+| UI | `control/` | 控制台 HTTP 服务、一次性入口、Cookie/CSRF、JSON API、任务 |
+| UI | `webui/static/` | 无构建 SPA：总览、服务、更新、Jupyter、设置、诊断、关于 |
+| UI | `tray/` | 最小托盘入口、单实例/IPC、Agent 生命周期 |
+| UI | `install/` | 主控制台入口 + 每服务详情快捷方式（Windows `.lnk` / Linux `.desktop`） |
 | 平台 | `platform/` | 分离进程、窗口枚举/置前、打开路径、原生消息框 |
 
 依赖方向：`services/*` → 共享模块；共享模块不导入 `services/*` 的具体服务，
@@ -53,7 +59,7 @@ flowchart TB
 
 ```python
 class ServiceAdapter(Protocol):
-    spec: ServiceSpec  # id / 默认端口 / 回退端口 / 是否接管 / 是否过场
+    spec: ServiceSpec  # id / 默认端口 / 回退端口 / 是否接管
     settings: Any  # 该服务的配置对象（含 UI 字段）
 
     def prepare(self, *, host, port) -> LaunchPlan: ...
@@ -86,8 +92,8 @@ class ServiceAdapter(Protocol):
   memory.toml               启动器原子重写
   launcher.log              动作审计
   upgrades.log              dsh 升级日志
-  panel-browser/            更新面板专用浏览器配置
-  tray.lock / tray.json     托盘单实例锁与 loopback IPC
+  control-browser/          Web 控制台专用浏览器配置
+  tray.lock / tray.json     Agent 单实例锁与 loopback IPC
   services/
     dsh/    state.json  service.log  service.lock  browser/
     jupyter/state.json  service.log  service.lock  browser/
@@ -106,18 +112,20 @@ class ServiceAdapter(Protocol):
 
 ## 生命周期
 
-1. `Supervisor.effective_port()`：排除其它服务端口 → 探测上次/配置/回退候选。
-2. `start()`：可信 state 且进程存活 → 复用；显式换端口 → 先停旧实例。
-3. `adapter.prepare()` 生成 argv/env/cwd；核心写 `[launcher] start` 标记后分离启动。
-4. 写 `state.json`（pid/create_time/port/url/token/extra）。
-5. 轮询 `adapter.ready()`；进程消失或超时则杀树、删 state，并附上适配器的失败解释。
-6. `stop()`：state 可信 → 优雅停止 → 等端口释放 → 兜底杀树；state 不可信时只有
+1. 控制台启动：Agent 绑定 loopback HTTP、写入一次性入口信息，打开 `control-browser/`。
+2. `Supervisor.effective_port()`：排除其它服务端口 → 探测上次/配置/回退候选。
+3. `start()`：可信 state 且进程存活 → 复用；显式换端口 → 先停旧实例。
+4. `adapter.prepare()` 生成 argv/env/cwd；核心写 `[launcher] start` 标记后分离启动。
+5. 写 `state.json`（pid/create_time/port/url/token/extra）。
+6. 轮询 `adapter.ready()`；进程消失或超时则杀树、删 state，并附上适配器的失败解释。
+7. `stop()`：state 可信 → 优雅停止 → 等端口释放 → 兜底杀树；state 不可信时只有
    dsh 允许按端口扫描（`stop_untracked`），Jupyter 只报告占用者。
 
 ## 并发约定
 
-- 每个服务一把跨进程 `service.lock`，CLI 与托盘共用；「启动全部/停止全部」按服务 id 排序依次拿锁，避免死锁。
-- 菜单回调立即返回，动作在 worker 线程执行；刷新合并 0.15s，标题 2s 轮询。
+- 每个服务一把跨进程 `service.lock`，CLI 与 Agent 共用；「启动全部/停止全部」按服务 id 排序依次拿锁，避免死锁。
+- 控制台写操作进入 JobManager 后台线程；HTTP 只返回 job id，页面轮询结果；服务动作仍由控制器互斥。
+- 控制台入口是一次性 ticket：`/boot/<ticket>` 设置 HttpOnly Cookie 后跳到 SPA；写请求校验 CSRF + Host + Origin。
 - `Supervisor` 的读操作不修改实例状态；`ServiceStatus` 是一次性快照。
 - 浏览器 dedupe 按各自 `--user-data-dir` 判定，两个服务的窗口互不干扰。
 
@@ -126,7 +134,7 @@ class ServiceAdapter(Protocol):
 1. 建 `services/<id>/`，实现 `ServiceAdapter`（通常 150–300 行）。
 2. 在 `services/registry.py` 的 `SERVICE_IDS` / `build()` / `_definition()` 注册。
 3. 在 `config.py` 文档与 `config.toml` 里加 `[<id>]` 默认值。
-4. 需要专属命令时在 `__main__.py` 增加子命令组。
+4. 给控制台增加专属 API 页面/动作时，在 `control/backend.py` 与 `webui/static/app.js` 增加入口。
 5. 加适配器测试：argv、就绪、停止、进程归属、状态扩展；共享层已有契约测试。
 6. `make smoke SERVICE=<id>` 真机验证 start → status → stop。
 

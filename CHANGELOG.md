@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0
+
+- 启动器改为「常驻 Agent + Web 控制台」：服务启停、状态、日志、配置、诊断、Jupyter 内核/工作目录、更新、安装与退出统一在 `http://127.0.0.1` 控制台。
+- 默认双击/无参数启动改为打开控制台；托盘只保留打开控制台和退出入口，删除旧的多级服务菜单与原生状态弹窗。
+- 控制台使用一次性 bootstrap ticket + HttpOnly Cookie + CSRF/Host/Origin 校验；服务 token 不返回页面，URL 只显示脱敏值。
+- 独立更新面板与启动过场页并入控制台；删除 `panel.py`、`splash.py` 与 `panel-browser/` 使用路径。
+- 桌面快捷方式改为 `ui` / `ui <service>`；更新日志、状态和配置操作增加结构化 API。
+- 新增控制台后端/认证/任务与 Web 资源测试。
+
 ## 0.6.1
 
 - 修复 Jupyter `--port 0`：就绪只读取本次启动标记、ownership 接受 argv 中的 `0`，`status/stop/restart` 不再丢失动态端口实例。

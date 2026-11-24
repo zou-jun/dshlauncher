@@ -19,8 +19,8 @@ ASSIGN_RE = re.compile(r"(?i)(\b(?:token|password|secret)\s*=\s*)(\"[^\"]*\"|'[^
 
 def redact(text: str) -> str:
     """审计/状态弹窗里去掉 URL 查询和配置赋值中的 token。"""
-    text = TOKEN_RE.sub(r"\1<redacted>", text)
-    return ASSIGN_RE.sub(lambda match: match.group(1) + '"<redacted>"', text)
+    text = ASSIGN_RE.sub(lambda match: match.group(1) + '"<redacted>"', text)
+    return TOKEN_RE.sub(r"\1<redacted>", text)
 
 
 def parse_url(text: str) -> str | None:

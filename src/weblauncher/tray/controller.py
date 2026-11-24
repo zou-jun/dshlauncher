@@ -36,6 +36,11 @@ class TrayController:
     def stopping(self) -> bool:
         return self._stopping.is_set()
 
+    @property
+    def busy(self) -> bool:
+        """只读探测，不抢占动作锁。"""
+        return self._busy.locked()
+
     def mark_stopping(self) -> None:
         self._stopping.set()
 

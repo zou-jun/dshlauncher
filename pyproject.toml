@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "weblauncher"
-version = "0.6.1"
-description = "本地服务启动器：托管 dsh web / Jupyter Lab，并在独立 Chromium 窗口里打开 UI"
+version = "0.7.0"
+description = "本地服务启动器：用一个 Web 控制台托管 dsh web / Jupyter Lab"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
