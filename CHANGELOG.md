@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1
+
+- Windows 托管进程改用 `CREATE_NO_WINDOW` 分离标志，修复通过 `jupyter-lab.exe` 启动 Jupyter 时额外出现的终端窗口；Jupyter 日志仍写入 `service.log`。
+- 进程树仍通过 `CREATE_NEW_PROCESS_GROUP` + `CREATE_BREAKAWAY_FROM_JOB` 与启动器分离，关闭终端/控制台不影响服务。
+
 ## 0.7.0
 
 - 启动器改为「常驻 Agent + Web 控制台」：服务启停、状态、日志、配置、诊断、Jupyter 内核/工作目录、更新、安装与退出统一在 `http://127.0.0.1` 控制台。

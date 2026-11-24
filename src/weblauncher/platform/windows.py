@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ..geometry import Rect
 
-DETACHED_PROCESS = 0x00000008
+CREATE_NO_WINDOW = 0x08000000
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
@@ -28,7 +28,9 @@ _PROCESS_NAME = {
 
 
 def detach_kwargs(*, breakaway: bool = True) -> dict[str, int]:
-    flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    # DETACHED_PROCESS 会让 jupyter-lab.exe 拉起的 python.exe 再分配一个
+    # conhost 窗口；CREATE_NO_WINDOW 直接给整个子进程树一个无控制台环境。
+    flags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
     if breakaway:
         flags |= CREATE_BREAKAWAY_FROM_JOB
     return {"creationflags": flags}
