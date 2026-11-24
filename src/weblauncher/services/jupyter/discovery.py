@@ -86,9 +86,10 @@ def _from_receipts() -> list[Path]:
         receipt = tool / "uv-receipt.toml"
         try:
             data = tomllib.loads(receipt.read_text("utf-8"))
-        except (OSError, tomllib.TOMLDecodeError):
+        except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
             continue
-        entries = data.get("tool", {}).get("entrypoints", [])
+        tool_data = data.get("tool")
+        entries = tool_data.get("entrypoints", []) if isinstance(tool_data, dict) else []
         if not isinstance(entries, list):
             continue
         for entry in entries:
@@ -115,7 +116,7 @@ def _candidates(configured: Path | None) -> list[Path]:
     candidates: list[Path] = []
     if configured is not None:
         candidates.append(configured)
-    explicit = _env("JUPYTER_BIN")
+    explicit = _env("BIN")
     if explicit:
         candidates.append(Path(explicit).expanduser())
     candidates.extend(_from_receipts())

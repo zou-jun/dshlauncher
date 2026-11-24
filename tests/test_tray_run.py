@@ -17,15 +17,16 @@ def _runtime(tmp_path: Path, backend: object | None = None) -> Runtime:
 
 
 def test_run_delegates_to_existing_tray(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[float] = []
+    calls: list[tuple[float, float]] = []
 
     def fake_send(paths_, timeout: float, *, wait: float = 0.0) -> str:
-        calls.append(wait)
+        calls.append((timeout, wait))
         return "opened"
 
     monkeypatch.setattr(tray_app, "send_open", fake_send)
     assert tray_app.run(_runtime(tmp_path)) == 0
-    assert calls == [0.0]
+    assert calls[0][1] == 0.0
+    assert calls[0][0] > 5.0
 
 
 def test_run_becomes_tray_when_lock_acquired(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

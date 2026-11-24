@@ -111,3 +111,21 @@ def test_stop_checks_planned_port_without_state(state_file: Path, monkeypatch: p
 
     assert controller.stop() is True
     assert killed == [88]
+
+
+def test_graceful_stop_kills_when_process_survives(state_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state_file.write_text("{}", "utf-8")
+    controller = service.Service(Settings())
+    state = service.State(pid=123, create_time=1.0, port=18080)
+    killed: list[int] = []
+
+    monkeypatch.setattr(controller, "read_state", lambda: state)
+    monkeypatch.setattr(controller, "live_process", lambda value: SimpleNamespace(pid=123))
+    monkeypatch.setattr(controller.adapter, "request_stop", lambda value: True)
+    monkeypatch.setattr(controller, "_kill_tree", lambda pid: killed.append(pid))
+    monkeypatch.setattr(controller, "_wait_port_closed", lambda port: None)
+    monkeypatch.setattr(controller, "port_open", lambda port=None: False)
+
+    assert controller.stop() is True
+    assert killed == [123]
+    assert not state_file.exists()

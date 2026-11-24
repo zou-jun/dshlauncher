@@ -84,3 +84,11 @@ def test_node_candidates_include_nvm_dir(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr(discovery, "WINDOWS", False)
 
     assert node in discovery.node_candidates()
+
+
+def test_versioned_dirs_sort_numerically(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for version in ("v9.0.0", "v20.1.0"):
+        (tmp_path / ".nvm" / "versions" / "node" / version).mkdir(parents=True)
+    monkeypatch.setattr(discovery.Path, "home", classmethod(lambda cls: tmp_path))
+    found = discovery._versioned_dirs(".nvm/versions/node/*")
+    assert [path.name for path in found] == ["v20.1.0", "v9.0.0"]

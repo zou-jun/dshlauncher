@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from ... import browser
+from ...tickets import TicketServer
 from . import service, updates
 from .upgrade import BusyError, UpgradeError, UpgradeJob, UpgradeManager
 
@@ -425,15 +426,6 @@ class _Handler(BaseHTTPRequestHandler):
         if path != self._base() + "/api/upgrade":
             self._json(404, {"error": "not found"})
             return
-        origin = (self.headers.get("Origin") or "").strip()
-        expected = f"http://127.0.0.1:{self.server.server_address[1]}"
-        if origin and origin != expected:
-            self._json(403, {"error": "forbidden origin"})
-            return
-        token = self.headers.get("X-Panel-Token") or ""
-        if not hmac.compare_digest(token.encode(), self.server.panel.token.encode()):
-            self._json(403, {"error": "unauthorized"})
-            return
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
@@ -442,8 +434,18 @@ class _Handler(BaseHTTPRequestHandler):
         if length <= 0 or length > 65536:
             self._json(400, {"error": "invalid body"})
             return
+        raw_body = self.rfile.read(length)
+        origin = (self.headers.get("Origin") or "").strip().lower()
+        port = self.server.server_address[1]
+        if origin and origin not in {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}:
+            self._json(403, {"error": "forbidden origin"})
+            return
+        token = self.headers.get("X-Panel-Token") or ""
+        if not hmac.compare_digest(token.encode(), self.server.panel.token.encode()):
+            self._json(403, {"error": "unauthorized"})
+            return
         try:
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            payload = json.loads(raw_body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             self._json(400, {"error": "invalid json"})
             return
@@ -484,6 +486,7 @@ class PanelServer:
         self._report: updates.UpdateReport | None = None
         self._report_at = 0.0
         self._closed = False
+        self._opened_once = False
         self.manager = UpgradeManager(context, exclusive=exclusive)
         httpd = _PanelHttpd(("127.0.0.1", 0), _Handler)
         httpd.panel = self
@@ -522,9 +525,23 @@ class PanelServer:
         panel_settings = replace(
             self.context.settings,
             profile_dir=self.context.paths.panel_profile,
-            dedupe=True,
+            dedupe=self._opened_once,
         )
-        return browser.launch(panel_settings, self.url, backend=self.context.backend)
+        ticket = TicketServer(self.url)
+        ticket.start()
+        try:
+            result = browser.launch(
+                panel_settings,
+                ticket.url,
+                backend=self.context.backend,
+                dedupe=self._opened_once,
+            )
+        except Exception:
+            ticket.close()
+            raise
+        ticket.close_later(15.0)
+        self._opened_once = True
+        return result
 
     def close(self) -> None:
         if self._closed:

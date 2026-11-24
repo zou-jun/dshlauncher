@@ -89,8 +89,8 @@ class ServiceAdapter(Protocol):
   panel-browser/            更新面板专用浏览器配置
   tray.lock / tray.json     托盘单实例锁与 loopback IPC
   services/
-    dsh/    state.json  service.log  browser/
-    jupyter/state.json  service.log  browser/
+    dsh/    state.json  service.log  service.lock  browser/
+    jupyter/state.json  service.log  service.lock  browser/
 ```
 
 优先级：
@@ -116,7 +116,7 @@ class ServiceAdapter(Protocol):
 
 ## 并发约定
 
-- 托盘每个服务一把动作锁；「启动全部/停止全部」按服务 id 排序依次拿锁，避免死锁。
+- 每个服务一把跨进程 `service.lock`，CLI 与托盘共用；「启动全部/停止全部」按服务 id 排序依次拿锁，避免死锁。
 - 菜单回调立即返回，动作在 worker 线程执行；刷新合并 0.15s，标题 2s 轮询。
 - `Supervisor` 的读操作不修改实例状态；`ServiceStatus` 是一次性快照。
 - 浏览器 dedupe 按各自 `--user-data-dir` 判定，两个服务的窗口互不干扰。

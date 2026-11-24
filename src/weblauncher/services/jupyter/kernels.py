@@ -69,19 +69,42 @@ def user_kernels_dir() -> Path:
 
 
 def kernel_dirs(install: Install) -> list[Path]:
-    dirs: list[Path] = [user_kernels_dir()]
-    if install.env is not None:
-        dirs.append(install.env / "share" / "jupyter" / "kernels")
+    """按 Jupyter 的解析顺序列出内核目录（先出现者生效）。
+
+    Jupyter 在 uv-tool 这类 venv 里优先 env，再 user；``JUPYTER_PATH`` 永远最前。
+    """
+    dirs: list[Path] = []
     for entry in os.environ.get("JUPYTER_PATH", "").split(os.pathsep):
         if entry.strip():
             dirs.append(Path(entry.strip()).expanduser() / "kernels")
-    return dirs
+    if install.env is not None:
+        dirs.append(install.env / "share" / "jupyter" / "kernels")
+    dirs.append(user_kernels_dir())
+    if WINDOWS:
+        programdata = os.environ.get("PROGRAMDATA", "").strip()
+        if programdata:
+            dirs.append(Path(programdata) / "jupyter" / "kernels")
+    elif sys.platform != "darwin":
+        dirs.extend(
+            [
+                Path("/usr/local/share/jupyter/kernels"),
+                Path("/usr/share/jupyter/kernels"),
+            ]
+        )
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for directory in dirs:
+        key = os.path.normcase(str(directory))
+        if key not in seen:
+            seen.add(key)
+            unique.append(directory)
+    return unique
 
 
 def _read_spec(directory: Path, managed: dict[str, str]) -> Kernel | None:
     try:
         data = json.loads((directory / "kernel.json").read_text("utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
         return None
     if not isinstance(data, dict):
         return None
@@ -267,7 +290,7 @@ def rename_kernel(kernel: Kernel, display_name: str) -> Kernel:
     path = kernel.resource_dir / "kernel.json"
     try:
         data = json.loads(path.read_text("utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         raise KernelError(f"读取 {path} 失败：{exc}") from exc
     if not isinstance(data, dict):
         raise KernelError(f"{path} 不是对象")

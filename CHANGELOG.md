@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1
+
+- 修复 Jupyter `--port 0`：就绪只读取本次启动标记、ownership 接受 argv 中的 `0`，`status/stop/restart` 不再丢失动态端口实例。
+- start/stop/restart 增加跨进程服务锁；托盘空参数 open 也走服务动作锁，避免并发启动产生孤儿进程。
+- 浏览器打开改为一次性 ticket 跳转，服务/面板 token 不再进入 Chromium argv；运行日志、配置和目录收紧权限并脱敏审计。
+- 修复 Jupyter 的 `WEBLAUNCHER_JUPYTER_BIN`、内核目录优先级、首次按目录内核记忆、代理绕过、IPv6/括号路径与优雅停止存活检查。
+- 修复托盘 open 超时、退出时并发停止、查看日志目录、面板 `localhost` Origin、配置 `list`、动态端口状态展示、Linux 桌面入口旧文件清理与版本排序。
+
 ## 0.6.0
 
 - 项目更名为 `weblauncher`：包名、exe、console script、数据目录、PyInstaller spec 与文档统一。

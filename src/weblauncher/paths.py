@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
+from typing import BinaryIO, Literal, TextIO, overload
 
 DATA_DIR_NAME = ".weblauncher"
 LEGACY_DATA_DIR_NAME = ".dshlauncher"
@@ -75,26 +76,59 @@ def _writable(path: Path) -> bool:
         return False
 
 
+def _mkdir_private(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        with contextlib.suppress(OSError):
+            path.chmod(0o700)
+
+
+@overload
+def open_append(path: Path, *, binary: Literal[True]) -> BinaryIO: ...
+
+
+@overload
+def open_append(path: Path, *, binary: Literal[False] = False) -> TextIO: ...
+
+
+def open_append(path: Path, *, binary: bool = False) -> BinaryIO | TextIO:
+    """打开运行日志：新文件 0600，已有文件也收紧到 0600（POSIX）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o600)
+    if os.name != "nt":
+        with contextlib.suppress(OSError):
+            os.chmod(path, 0o600)
+    if binary:
+        return os.fdopen(fd, "ab", buffering=0)
+    return os.fdopen(fd, "a", encoding="utf-8")
+
+
 @lru_cache(maxsize=1)
 def data_dir() -> Path:
     override = os.environ.get("WEBLAUNCHER_HOME")
     if override:
         path = Path(override).expanduser().resolve()
-        path.mkdir(parents=True, exist_ok=True)
+        _mkdir_private(path)
         return path
     beside_exe = executable_dir() / DATA_DIR_NAME
+    legacy_fallback = _user_data_dir("dshlauncher")
     _migrate_dir(executable_dir() / LEGACY_DATA_DIR_NAME, beside_exe)
+    if not beside_exe.exists():
+        # 旧版 exe 在 Program Files 时会落到用户目录；新版若可写，应优先把它带过来。
+        _migrate_dir(legacy_fallback, beside_exe)
     if _writable(beside_exe):
+        _mkdir_private(beside_exe)
         return beside_exe
     fallback = _user_data_dir()
-    _migrate_dir(_user_data_dir("dshlauncher"), fallback)
-    fallback.mkdir(parents=True, exist_ok=True)
+    _migrate_dir(legacy_fallback, fallback)
+    _mkdir_private(fallback)
     return fallback
 
 
 def ensure_data_dir() -> Path:
     path = data_dir()
-    path.mkdir(parents=True, exist_ok=True)
+    _mkdir_private(path)
     return path
 
 
@@ -129,11 +163,15 @@ class ServicePaths:
         return self.root / "service.log"
 
     @property
+    def lock(self) -> Path:
+        return self.root / "service.lock"
+
+    @property
     def profile(self) -> Path:
         return self.root / "browser"
 
     def ensure(self) -> Path:
-        self.root.mkdir(parents=True, exist_ok=True)
+        _mkdir_private(self.root)
         return self.root
 
 
@@ -148,7 +186,7 @@ class Paths:
         return cls(data_dir())
 
     def ensure(self) -> Path:
-        self.data.mkdir(parents=True, exist_ok=True)
+        _mkdir_private(self.data)
         return self.data
 
     def migrate_legacy(self) -> list[str]:
@@ -241,7 +279,7 @@ class Paths:
             if detail:
                 rows = [row.strip() for row in detail.splitlines() if row.strip()]
                 line += " | " + " | ".join(rows)[:1000]
-            with log.open("a", encoding="utf-8") as handle:
+            with open_append(log) as handle:
                 handle.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {line}\n")
         except OSError:
             pass

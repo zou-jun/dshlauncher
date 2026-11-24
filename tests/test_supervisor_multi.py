@@ -62,3 +62,18 @@ def test_own_previous_port_is_preferred(tmp_path: Path, monkeypatch: pytest.Monk
     service.state.write_text('{"pid": 1, "create_time": 0, "port": 18082, "url": null}', "utf-8")
     controller = Supervisor(Adapter(), paths_=paths.Paths(tmp_path), backend=SimpleNamespace())
     assert controller.effective_port() == 18082
+
+
+def test_port_open_maps_wildcard_to_loopback(tmp_path: Path) -> None:
+    import socket
+
+    server = socket.socket()
+    server.bind(("0.0.0.0", 0))
+    server.listen(1)
+    port = int(server.getsockname()[1])
+    adapter = Adapter()
+    adapter.settings = SimpleNamespace(host="0.0.0.0", port=port, port_explicit=False, start_timeout=1.0)
+    try:
+        assert Supervisor(adapter, paths_=paths.Paths(tmp_path)).port_open(port)
+    finally:
+        server.close()

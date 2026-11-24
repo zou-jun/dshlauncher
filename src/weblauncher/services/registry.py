@@ -9,7 +9,6 @@ from ..context import ServiceContext
 from .dsh.adapter import DshAdapter
 from .dsh.settings import Settings as DshSettings  # noqa: F401 - 供类型检查/外部引用
 from .dsh.settings import load as load_dsh
-from .jupyter import discovery as jupyter_discovery
 from .jupyter.adapter import JupyterAdapter
 from .jupyter.settings import Settings as JupyterSettings  # noqa: F401
 from .jupyter.settings import load as load_jupyter
@@ -44,8 +43,7 @@ def build(
         adapter = DshAdapter(settings, runtime.paths)
     elif service_id == "jupyter":
         settings = load_jupyter(config=runtime.config, memory=runtime.memory, **options)
-        install = jupyter_discovery.find(settings.jupyter_bin)
-        adapter = JupyterAdapter(settings, install, runtime.memory)
+        adapter = JupyterAdapter(settings, None, runtime.memory)
     else:
         raise KeyError(f"未知服务：{service_id}")
     definition = _definition(service_id)

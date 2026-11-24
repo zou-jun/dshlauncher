@@ -40,13 +40,13 @@ def _write_kernel(base: Path, name: str, python: str = "python", display: str | 
     return directory
 
 
-def test_list_merges_user_before_env(tmp_path: Path, data_dir: Path) -> None:
+def test_list_merges_env_before_user(tmp_path: Path, data_dir: Path) -> None:
     _write_kernel(data_dir, "shared", "E:/user/python.exe", "User")
     _write_kernel(tmp_path / "env" / "share" / "jupyter", "shared", "E:/env/python.exe", "Env")
     _write_kernel(tmp_path / "env" / "share" / "jupyter", "python3", "python", "Python 3")
     specs = kernels.list_kernels(_install(tmp_path), {})
     assert [spec.name for spec in specs] == ["python3", "shared"]
-    assert next(spec for spec in specs if spec.name == "shared").display_name == "User"
+    assert next(spec for spec in specs if spec.name == "shared").display_name == "Env"
 
 
 def test_add_kernel_builds_ipykernel_install_command(

@@ -130,6 +130,7 @@ weblauncher updates --profile dsh-tui --timeout 60
 |---|---|
 | `services/<id>/state.json` | 该服务的 pid / create_time / port / url / token |
 | `services/<id>/service.log` | 该服务的 stdout/stderr，含每次启动的 `[launcher] start` 标记 |
+| `services/<id>/service.lock` | start/stop/restart 的跨进程互斥锁（正常结束自动删除） |
 | `services/<id>/browser/` | 该服务专用的 Chromium 配置（零扩展；cookie 绑定 host:port） |
 | `memory.toml` | 启动器写的选择记忆：Jupyter 工作目录、最近目录、默认内核、按目录内核 |
 | `config.toml` | 手写/`config set` 的运行参数（`[launcher] [ui] [dsh] [jupyter]`） |
@@ -139,6 +140,8 @@ weblauncher updates --profile dsh-tui --timeout 60
 | `tray.lock` / `tray.json` | 托盘单实例锁与 loopback IPC 端口/随机 token |
 
 旧版单服务布局（根目录 `state.json` / `dsh-web.log` / `browser/`）会在首次运行时自动搬进 `services/dsh/`；旧品牌数据目录 `.dshlauncher/` 也会在首次启动时整体改名为 `.weblauncher/`。
+
+POSIX 上运行时目录按 0700、状态/日志/配置文件按 0600 创建，避免同机其它用户读取 token。
 
 配置优先级：**命令行参数 > 环境变量 `WEBLAUNCHER_DSH_*` > `config.toml` > 默认值**。
 

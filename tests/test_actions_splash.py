@@ -130,7 +130,9 @@ def test_open_skips_splash_when_service_already_live(tmp_path: Path, monkeypatch
     result = actions.open_service(_context(tmp_path, controller))
 
     assert FakeSplash.instances == []
-    assert calls == [state.url]
+    assert len(calls) == 1
+    assert calls[0].startswith("http://127.0.0.1:")
+    assert state.url is not None and state.url not in calls[0]
     assert "started=False" in result
 
 

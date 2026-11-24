@@ -16,7 +16,7 @@ from typing import Any
 
 import psutil
 
-from ...paths import child_env
+from ...paths import child_env, open_append
 from . import discovery, updates
 
 WINDOWS = os.name == "nt"
@@ -378,7 +378,7 @@ class UpgradeManager:
                     rotated = path.with_name(path.name + ".1")
                     rotated.unlink(missing_ok=True)
                     path.replace(rotated)
-                with path.open("a", encoding="utf-8") as handle:
+                with open_append(path) as handle:
                     handle.write(text)
         except OSError:
             pass

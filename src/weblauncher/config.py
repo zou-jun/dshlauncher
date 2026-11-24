@@ -78,7 +78,7 @@ def read_raw(path: Path) -> dict[str, Any]:
     try:
         with path.open("rb") as handle:
             data = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -250,7 +250,9 @@ def set_value(path: Path, dotted: str, value: Any) -> None:
                 insert_at = index + 1
             lines.insert(insert_at, assignment)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", "utf-8")
+    from . import paths as paths_mod
+
+    paths_mod.write_atomic(path, "\n".join(lines) + "\n")
 
 
 def unset_value(path: Path, dotted: str) -> bool:
@@ -286,7 +288,9 @@ def unset_value(path: Path, dotted: str) -> bool:
                 removed = True
                 break
     if removed:
-        path.write_text("\n".join(lines) + "\n", "utf-8")
+        from . import paths as paths_mod
+
+        paths_mod.write_atomic(path, "\n".join(lines) + "\n")
     return removed
 
 

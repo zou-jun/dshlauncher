@@ -57,11 +57,10 @@ def remember(memory: dict, workdir: Path, kernel: str | None = None) -> None:
     if kernel:
         memory_mod.set_value(memory, "jupyter", "kernel", kernel)
         if table.get("remember_per_workdir", True) is not False:
-            mapping = table.get("workdir_kernels")
-            if not isinstance(mapping, dict):
-                mapping = {}
-                table["workdir_kernels"] = mapping
+            raw_mapping = table.get("workdir_kernels")
+            mapping = dict(raw_mapping) if isinstance(raw_mapping, dict) else {}
             mapping[str(resolved)] = kernel
+            memory_mod.set_value(memory, "jupyter", "workdir_kernels", mapping)
 
 
 def remember_kernel(memory: dict, kernel: str) -> None:

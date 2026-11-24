@@ -111,7 +111,7 @@ def create(
     applications.mkdir(parents=True, exist_ok=True)
     installed_icon = install_icon(icon)
 
-    entries: dict[str, tuple[str, str]] = {MAIN_NAME: ("dsh web", "tray")}
+    entries: dict[str, tuple[str, str]] = {MAIN_NAME: ("Web 服务启动器", "tray")}
     for service in services:
         if service == "dsh":
             continue
@@ -125,7 +125,7 @@ def create(
         path.write_text(_entry(label, action, installed_icon), "utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
         written.append(path)
-    for directory in _desktop_dirs():
+    for directory in [applications, *_desktop_dirs()]:
         for name in LEGACY_NAMES:
             legacy = directory / name
             if legacy.is_file():

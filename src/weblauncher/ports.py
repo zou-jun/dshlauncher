@@ -14,6 +14,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Any
 
 #: 默认端口不可用时的回退序列。3080 是历史默认（浏览器 cookie 绑 host:port，
 #: 换端口等于重新授权一次），其后取远离常见动态预留的高位端口。
@@ -84,7 +85,7 @@ def excluded_ranges() -> tuple[tuple[int, int], ...]:
         return ()
     try:
         # netsh 是控制台程序；GUI 启动器里不加这个标志会闪一个终端窗口。
-        flags = {"creationflags": CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+        flags: dict[str, Any] = {"creationflags": CREATE_NO_WINDOW} if sys.platform == "win32" else {}
         completed = subprocess.run(
             ["netsh", "interface", "ipv4", "show", "excludedportrange", "protocol=tcp"],
             capture_output=True,

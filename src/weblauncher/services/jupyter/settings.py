@@ -72,7 +72,7 @@ def effective_kernel(memory: dict[str, Any], workdir: Path, *, remember: bool = 
         if isinstance(mapping, dict):
             for key, value in mapping.items():
                 try:
-                    same = Path(key).expanduser().resolve() == workdir
+                    same = Path(key).expanduser().resolve() == workdir.expanduser().resolve()
                 except OSError:
                     same = str(key) == str(workdir)
                 if same and isinstance(value, str) and value:
@@ -124,7 +124,7 @@ def load(
         or _value(cfg, section, "kernel", None)
     )
     profile_value = profile_dir or _env("PROFILE_DIR") or _value(cfg, section, "profile_dir", None)
-    jupyter_value = jupyter_bin or _env("JUPYTER_BIN") or _value(cfg, section, "jupyter_bin", None)
+    jupyter_value = jupyter_bin or _env("BIN") or _value(cfg, section, "jupyter_bin", None)
     base_value = base_url or _env("BASE_URL") or _value(cfg, section, "base_url", DEFAULT_BASE_URL)
 
     resolved_ozone = str(ozone or cfg.ui.ozone or defaults.ozone).strip().lower()

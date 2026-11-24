@@ -14,7 +14,7 @@ from typing import Any
 
 import psutil
 
-from .. import actions, paths
+from .. import logs, paths
 from ..context import Runtime, ServiceContext
 from ..services.dsh import panel as dsh_panel
 from ..services.dsh.upgrade import BusyError
@@ -93,9 +93,12 @@ class TrayApp:
         try:
             self.icon.run(setup=self._setup)
         except KeyboardInterrupt:
-            self.runtime.paths.audit("tray: Ctrl+C，停止全部服务后退出")
-            with contextlib.suppress(Exception):
-                self._batch("stop")
+            if self.runtime.config.launcher.tray_exit_stops_services:
+                self.runtime.paths.audit("tray: Ctrl+C，停止全部服务后退出")
+                with contextlib.suppress(Exception):
+                    self._batch("stop", wait=True)
+            else:
+                self.runtime.paths.audit("tray: Ctrl+C，服务继续运行")
         finally:
             self._shutdown()
         return 0
@@ -208,37 +211,50 @@ class TrayApp:
                 continue
             controller = self.controllers[context.service_id]
             try:
-                controller.run_exclusive(controller.start)
-                state = controller.service.read_state()
-                self.runtime.paths.audit(f"tray 启动 {context.service_id}: pid={getattr(state, 'pid', '-')}")
-                if context.definition.open_on_start:
-                    controller.open_window()
-                    self.runtime.paths.audit(f"tray 打开 {context.service_id}")
+
+                def bring_up(ctrl=controller, ctx=context) -> None:
+                    ctrl.start()
+                    state = ctrl.service.read_state()
+                    self.runtime.paths.audit(f"tray 启动 {ctx.service_id}: pid={getattr(state, 'pid', '-')}")
+                    if ctx.definition.open_on_start and not self._stopping.is_set():
+                        ctrl.open_window()
+                        self.runtime.paths.audit(f"tray 打开 {ctx.service_id}")
+
+                controller.run_exclusive(bring_up)
             except Exception as exc:  # noqa: BLE001 - 托盘启动失败也要留在任务栏
                 text = f"{context.spec.label} 启动失败：{type(exc).__name__}: {exc}"
                 self.runtime.paths.audit(text, detail=traceback.format_exc())
                 self._notify(text)
         self._schedule_refresh()
 
-    def _batch(self, action: str) -> str:
+    def _batch(self, action: str, *, wait: bool = False) -> str:
         ordered = sorted(self.controllers.values(), key=lambda ctrl: ctrl.context.service_id)
-        acquired: list[TrayController] = []
+        acquired = contextlib.ExitStack()
         try:
             for controller in ordered:
-                if not controller.try_begin():
-                    raise BusyError(BUSY_TEXT)
-                acquired.append(controller)
-            results: list[str] = []
-            for controller in ordered:
-                if action == "start":
-                    results.append(f"{controller.context.spec.label}: {controller.start()}")
+                if wait:
+                    acquired.enter_context(controller.held())
+                elif controller.try_begin():
+                    acquired.callback(controller.end)
                 else:
-                    stopped = controller.stop()
-                    results.append(f"{controller.context.spec.label}: {'已停止' if stopped else '未运行'}")
+                    raise BusyError(BUSY_TEXT)
+            results: list[str] = []
+            errors: list[str] = []
+            for controller in ordered:
+                label = controller.context.spec.label
+                try:
+                    if action == "start":
+                        results.append(f"{label}: {controller.start()}")
+                    else:
+                        stopped = controller.stop()
+                        results.append(f"{label}: {'已停止' if stopped else '未运行'}")
+                except Exception as exc:  # noqa: BLE001 - 一个服务失败不能阻断其余服务
+                    errors.append(f"{label}: {type(exc).__name__}: {exc}")
+            if errors:
+                raise RuntimeError("；".join(errors))
             return "；".join(results)
         finally:
-            for controller in acquired:
-                controller.end()
+            acquired.close()
 
     def _default_contexts(self) -> list[ServiceContext]:
         return [context for context in self.contexts if context.definition.open_on_start]
@@ -246,7 +262,8 @@ class TrayApp:
     def _open_defaults(self) -> str:
         results = []
         for context in self._default_contexts():
-            results.append(f"{context.spec.label}: {actions.open_service(context)}")
+            controller = self.controllers[context.service_id]
+            results.append(f"{context.spec.label}: {controller.run_exclusive(controller.open_window)}")
         return "；".join(results)
 
     def _dsh_controller(self) -> TrayController | None:
@@ -275,7 +292,10 @@ class TrayApp:
             text = f"读取状态失败：{type(exc).__name__}: {exc}"
             self.runtime.paths.audit(text, detail=traceback.format_exc())
         try:
-            self.runtime.backend.message(f"{TITLE} · {controller.context.spec.label}", text)
+            self.runtime.backend.message(
+                f"{TITLE} · {controller.context.spec.label}",
+                logs.redact(text),
+            )
         except Exception as exc:  # noqa: BLE001 - 没有原生对话框时退回气泡
             self._notify(f"打开状态窗口失败：{type(exc).__name__}: {exc}")
 
@@ -296,7 +316,7 @@ class TrayApp:
                 self.panel = dsh_panel.PanelServer(controller.context, exclusive=self._exclusive)
                 self.panel.start()
             result = self.panel.open_window()
-            self.runtime.paths.audit(f"tray 更新面板: {result} {self.panel.url}")
+            self.runtime.paths.audit(f"tray 更新面板: {result} port={getattr(self.panel, 'port', '?')}")
         except Exception as exc:  # noqa: BLE001 - 托盘动作统一转成气泡 + 审计
             text = f"打开更新面板失败：{type(exc).__name__}: {exc}"
             self.runtime.paths.audit(text, detail=traceback.format_exc())
@@ -324,7 +344,7 @@ class TrayApp:
     def _stop_and_quit(self, icon: Any = None, item: Any = None) -> None:
         self._stopping.set()
         try:
-            self._batch("stop")
+            self._batch("stop", wait=True)
         except Exception as exc:  # noqa: BLE001 - 停不下来也要移除图标
             self.runtime.paths.audit(f"tray 退出停止服务失败: {exc}", detail=traceback.format_exc())
             self._notify(f"停止服务失败：{type(exc).__name__}: {exc}")
@@ -348,6 +368,8 @@ class TrayApp:
 
     # ── 刷新 / IPC ────────────────────────────────────────────────────
     def _ipc(self, command: str) -> str:
+        if self._stopping.is_set():
+            raise RuntimeError("托盘正在退出")
         parts = command.split(maxsplit=1)
         action = parts[0] if parts else ""
         target = parts[1].strip() if len(parts) > 1 else ""
@@ -412,8 +434,9 @@ def _print(text: str) -> None:
 
 def run(runtime: Runtime) -> int:
     """双击入口：有托盘就投递打开；没有就自己成为托盘。"""
+    open_timeout = runtime.config.launcher.start_timeout + 30.0
     try:
-        send_open(runtime.paths, timeout=5.0)
+        send_open(runtime.paths, timeout=open_timeout)
         return 0
     except TrayUnavailable:
         pass
@@ -422,7 +445,7 @@ def run(runtime: Runtime) -> int:
     if lock is None:
         # 另一个托盘正在启动：等它就绪后投递，失败则直接打开默认服务。
         try:
-            send_open(runtime.paths, timeout=5.0, wait=START_WAIT)
+            send_open(runtime.paths, timeout=open_timeout, wait=START_WAIT)
             return 0
         except TrayUnavailable:
             app = TrayApp(runtime)

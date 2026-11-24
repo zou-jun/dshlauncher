@@ -19,7 +19,7 @@ def load(path: Path | None = None) -> dict[str, Any]:
     try:
         with (path or paths_mod.memory_path()).open("rb") as handle:
             data = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
 

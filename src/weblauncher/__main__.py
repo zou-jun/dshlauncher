@@ -12,7 +12,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from . import __version__, actions, config, doctor, install, memory, paths, platform, tray
+from . import __version__, actions, config, doctor, install, logs, memory, paths, platform, tray
 from .context import Runtime, ServiceContext
 from .services import registry
 from .services.jupyter import kernels as jupyter_kernels
@@ -75,7 +75,7 @@ def _emit(text: str) -> None:
     if sys.stdout is not None:
         with contextlib.suppress(OSError):
             print(text)
-    _audit(text)
+    _audit(logs.redact(text))
 
 
 def _gui_error(text: str) -> None:
@@ -280,8 +280,11 @@ def _cmd_config(args: argparse.Namespace) -> int:
         _emit(str(path))
         return 0
     if args.config_command == "list":
-        raw = config.read_raw(path)
-        _emit(memory.dumps(raw).strip() if raw else "（配置文件为空，全部走默认值）")
+        try:
+            text = path.read_text("utf-8").strip()
+        except OSError:
+            text = ""
+        _emit(text if text else "（配置文件为空，全部走默认值）")
         return 0
     if args.config_command == "get":
         try:
@@ -521,9 +524,12 @@ def _cmd_jupyter_workdir(args: argparse.Namespace) -> int:
         _emit(f"工作目录已设为 {workdir}")
         try:
             context = runtime.context("jupyter", _jupyter_options(args))
+            state = context.service().read_state()
             snapshot = context.service().status(check_ports=False)
-            if snapshot.running and Path(snapshot.work_dir) != workdir:
-                _emit("Jupyter 正在运行，root_dir 需要 restart 后生效")
+            if snapshot.running and state is not None:
+                recorded = state.extra.get("root_dir") if isinstance(state.extra, dict) else None
+                if recorded and Path(recorded).expanduser().resolve() != workdir:
+                    _emit("Jupyter 正在运行，root_dir 需要 restart 后生效")
         except Exception:
             pass
         return 0
@@ -699,7 +705,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.handler(args)
     except Exception as exc:  # noqa: BLE001 - 统一转成提示 + 退出码
-        paths.audit(f"{args.command} 失败: {type(exc).__name__}: {exc}", detail=traceback.format_exc())
+        paths.audit(
+            logs.redact(f"{args.command} 失败: {type(exc).__name__}: {exc}"),
+            detail=logs.redact(traceback.format_exc()),
+        )
         _report_error(exc)
         return 1
 

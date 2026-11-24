@@ -133,7 +133,70 @@ def test_port_zero_is_recovered_from_log(tmp_path: Path, server) -> None:
     adapter = _adapter(tmp_path, port=0, base_url="/base/")
     plan = adapter.prepare(host="127.0.0.1", port=0)
     state = SimpleNamespace(port=0, token=plan.token)
-    log = f"[I] http://127.0.0.1:{port}/base/lab?token=...\n"
+    log = f"[launcher] start port=0 at=now\n[I] http://127.0.0.1:{port}/base/lab?token=...\n"
     url = adapter.ready(plan, state, port_open=lambda value: True, log_text=lambda: log)
     assert state.port == port
     assert url == f"http://127.0.0.1:{port}/base/lab?token=fixed"
+
+
+def test_owns_port_zero_process(tmp_path: Path) -> None:
+    adapter = _adapter(tmp_path)
+    line = '"python.exe" -m jupyterlab --ServerApp.port=0'
+    assert adapter.owns_process(line, 54321)
+
+
+def test_ready_ignores_previous_run_url(tmp_path: Path, server) -> None:
+    port = int(server.server_address[1])
+    adapter = _adapter(tmp_path, port=0, base_url="/base/")
+    plan = adapter.prepare(host="127.0.0.1", port=0)
+    state = SimpleNamespace(port=0, token=plan.token)
+    text = (
+        "[launcher] start port=0 at=old\n"
+        "http://127.0.0.1:11111/base/lab?token=old\n"
+        f"[launcher] start port=0 at=now\n[I] http://127.0.0.1:{port}/base/lab?token=...\n"
+    )
+    url = adapter.ready(plan, state, port_open=lambda value: value == port, log_text=lambda: text)
+    assert state.port == port
+    assert url is not None and f":{port}" in url
+
+
+def test_marker_escapes_braced_root(tmp_path: Path) -> None:
+    root = tmp_path / "{proj}"
+    root.mkdir()
+    adapter = _adapter(root)
+    plan = adapter.prepare(host="127.0.0.1", port=1)
+    assert str(root) in plan.marker.format(port=1, at="now")
+
+
+def test_ready_parses_ipv6_port_zero_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    class Opener:
+        def open(self, *args, **kwargs):
+            return Response()
+
+    from weblauncher.services.jupyter import adapter as jupyter_adapter
+
+    adapter = _adapter(tmp_path, port=0, base_url="/base/")
+    plan = adapter.prepare(host="::", port=0)
+    state = SimpleNamespace(port=0, token=plan.token)
+    text = "[launcher] start port=0 at=now\n[I] http://[::1]:54321/base/lab?token=...\n"
+    monkeypatch.setattr(jupyter_adapter, "_LOOPBACK_OPENER", Opener())
+    url = adapter.ready(plan, state, port_open=lambda value: value == 54321, log_text=lambda: text)
+    assert state.port == 54321
+    assert url is not None and "[::1]" in url
+
+
+def test_status_extra_prefers_running_state(tmp_path: Path) -> None:
+    adapter = _adapter(tmp_path, kernel="new")
+    state = SimpleNamespace(extra={"root_dir": str(tmp_path / "old"), "kernel": "old"})
+    extra = adapter.status_extra(state)
+    assert extra["root_dir"] == str(tmp_path / "old")
+    assert extra["kernel"] == "old"

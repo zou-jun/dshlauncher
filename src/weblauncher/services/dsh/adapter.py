@@ -64,6 +64,10 @@ class DshAdapter:
         return False
 
     def owns_process(self, cmdline: str, port: int | None = None) -> bool:
+        if self.settings.dsh_bin is not None:
+            configured = str(self.settings.dsh_bin).replace("\\", "/")
+            if configured and configured in cmdline.replace("\\", "/"):
+                return True
         return parse.is_dsh_cmdline(cmdline)
 
     def start_failure(self, log_text: str, port: int) -> str:
@@ -109,7 +113,7 @@ def _installed_version(bin_js: Path) -> str:
     for parent in (candidate.parent, candidate.parent.parent, candidate.parent.parent.parent):
         try:
             data = json.loads((parent / "package.json").read_text("utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, ValueError):
             continue
         if isinstance(data, dict) and data.get("name") and data.get("version"):
             return str(data["version"])

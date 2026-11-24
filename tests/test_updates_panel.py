@@ -54,11 +54,13 @@ def _get(url: str) -> tuple[int, bytes]:
         return response.status, response.read()
 
 
-def _post(url: str, payload: dict, token: str | None) -> tuple[int, dict]:
+def _post(url: str, payload: dict, token: str | None, *, origin: str | None = None) -> tuple[int, dict]:
     data = json.dumps(payload).encode()
     headers = {"Content-Type": "application/json"}
     if token is not None:
         headers["X-Panel-Token"] = token
+    if origin is not None:
+        headers["Origin"] = origin
     request = urllib.request.Request(url, data=data, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
@@ -123,4 +125,20 @@ def test_open_window_uses_separate_profile(
     monkeypatch.setattr(updates_panel.browser, "launch", fake_launch)
     assert panel.open_window() == "new"
     assert captured["settings"].profile_dir == panel.context.paths.panel_profile
-    assert captured["url"] == panel.url
+    assert captured["url"].startswith("http://127.0.0.1:")
+    assert panel.token not in captured["url"]
+
+
+def test_upgrade_accepts_localhost_origin(
+    panel: updates_panel.PanelServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(panel.manager, "start", lambda targets, report: {"status": "running"})
+    origin = f"http://localhost:{panel.port}"
+    status, payload = _post(
+        panel.url + "api/upgrade",
+        {"targets": ["dsh"]},
+        panel.token,
+        origin=origin,
+    )
+    assert status in {202, 409, 400}
+    assert "forbidden origin" not in payload.get("error", "")

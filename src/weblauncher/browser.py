@@ -114,6 +114,7 @@ def launch(
     只能每次都新开窗口。
     """
     backend = backend or platform.load()
+    assert backend is not None
     browser = discovery.browser_exe(settings.browser)
     names = backend.process_names(browser.family)
     profile = settings.profile_dir

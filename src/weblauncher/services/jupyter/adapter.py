@@ -10,12 +10,16 @@ import urllib.request
 from pathlib import Path
 
 from ... import paths
+from ...logs import START_MARKER
 from ...services.base import LaunchPlan, ServiceSpec
 from .discovery import Install
 from .settings import Settings
 
 #: 端口冲突时不接管、自动换端口；启动快，不需要过场页。
 FALLBACK_PORTS = (8889, 8890, 8891, 18888, 18889)
+
+#: Jupyter 只监听 loopback；不能把 token 交给 HTTP(S)_PROXY。
+_LOOPBACK_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def _url_host(host: str) -> str:
@@ -43,10 +47,23 @@ class JupyterAdapter:
         open_on_start=False,
     )
 
-    def __init__(self, settings: Settings, install: Install, memory: dict | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        install: Install | None = None,
+        memory: dict | None = None,
+    ) -> None:
         self.settings = settings
-        self.install = install
+        self._install = install
         self.memory = memory or {}
+
+    @property
+    def install(self) -> Install:
+        if self._install is None:
+            from . import discovery
+
+            self._install = discovery.find(self.settings.jupyter_bin)
+        return self._install
 
     # ── 启动 ──────────────────────────────────────────────────────────
     def prepare(self, *, host: str, port: int) -> LaunchPlan:
@@ -71,29 +88,42 @@ class JupyterAdapter:
         env = paths.child_env()
         env["JUPYTER_TOKEN"] = token
         env["PYTHONUNBUFFERED"] = "1"
+        root_text = str(self.settings.root_dir).replace("{", "{{").replace("}", "}}")
         return LaunchPlan(
             argv=argv,
             env=env,
             cwd=self.settings.root_dir,
             url=url,
             token=token,
-            marker="\n[launcher] start port={port} at={at} root=" + str(self.settings.root_dir) + "\n",
-            extra={"root_dir": str(self.settings.root_dir), "kernel": self.settings.kernel or ""},
+            marker="\n[launcher] start port={port} at={at} root=" + root_text + "\n",
+            extra={
+                "root_dir": str(self.settings.root_dir),
+                "kernel": self.settings.kernel or "",
+                "base_url": self.settings.base_url,
+            },
         )
 
     def ready(self, plan, state, *, port_open, log_text) -> str | None:  # noqa: ANN001
         port = state.port
         url = plan.url
         if not port:
-            # --port 0：真实端口只出现在 Jupyter 的启动日志里（token 已打码）。
-            match = re.search(r"http://[^\s:]+:(\d+)/", log_text())
+            # --port 0：真实端口只出现在本次启动标记之后。日志可能还包含上一次
+            # 运行的 URL，所以先截到最后一个 marker，避免把旧端口当成新端口。
+            text = log_text()
+            marker = text.rfind(START_MARKER)
+            if marker == -1:
+                return None
+            text = text[marker:]
+            match = re.search(r"http://(?:\[[^\]]+\]|[^\s:/]+):(\d+)/", text)
             if match is None:
                 return None
             port = int(match.group(1))
+            if not port_open(port):
+                return None
             state.port = port
             if url:
                 url = re.sub(r":0(?=/|\?)", f":{port}", url, count=1)
-        if not port_open(port):
+        elif not port_open(port):
             return None
         request = urllib.request.Request(
             self.status_url(port),
@@ -101,7 +131,7 @@ class JupyterAdapter:
             method="GET",
         )
         try:
-            with urllib.request.urlopen(request, timeout=2) as response:
+            with _LOOPBACK_OPENER.open(request, timeout=2) as response:
                 return url if response.status == 200 else None
         except (urllib.error.URLError, TimeoutError, OSError):
             return None
@@ -114,7 +144,7 @@ class JupyterAdapter:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=5) as response:
+            with _LOOPBACK_OPENER.open(request, timeout=5) as response:
                 return response.status in {200, 204}
         except (urllib.error.URLError, TimeoutError, OSError):
             return False
@@ -130,6 +160,9 @@ class JupyterAdapter:
             rf"--serverapp\.port={port}\b",
             rf"--port={port}\b",
             rf"--port\s+{port}\b",
+            r"--serverapp\.port=0\b",
+            r"--port=0\b",
+            r"--port\s+0\b",
         )
         return any(re.search(pattern, lowered) for pattern in patterns)
 
@@ -151,10 +184,16 @@ class JupyterAdapter:
         return self.settings.root_dir
 
     def status_extra(self, state) -> dict[str, str]:  # noqa: ANN001
-        extra = {"root_dir": str(self.settings.root_dir)}
-        if self.settings.kernel:
-            extra["kernel"] = self.settings.kernel
-        extra["base_url"] = self.settings.base_url
+        recorded = getattr(state, "extra", None)
+        recorded = recorded if isinstance(recorded, dict) else {}
+        root = str(recorded["root_dir"]) if "root_dir" in recorded else str(self.settings.root_dir)
+        kernel = (
+            str(recorded.get("kernel") or "") if "kernel" in recorded else str(self.settings.kernel or "")
+        )
+        extra = {"root_dir": root}
+        if kernel:
+            extra["kernel"] = kernel
+        extra["base_url"] = str(recorded.get("base_url") or self.settings.base_url)
         return extra
 
     def doctor_rows(self) -> list[tuple[str, str]]:

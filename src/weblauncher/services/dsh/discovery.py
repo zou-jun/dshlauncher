@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -49,10 +50,19 @@ def _run_command(args: list[str]) -> str | None:
     return result.stdout if result.returncode == 0 else None
 
 
+def _version_key(path: Path) -> tuple[int, ...]:
+    parts = re.findall(r"\d+", path.name)
+    return tuple(int(part) for part in parts) or (0,)
+
+
 def _versioned_dirs(pattern: str) -> list[Path]:
-    """展开 ``~/<pattern>`` 并按名字倒序（新版优先）。"""
+    """展开 ``~/<pattern>`` 并按版本号倒序（新版优先）。"""
     try:
-        return sorted((path for path in Path.home().glob(pattern) if path.is_dir()), reverse=True)
+        return sorted(
+            (path for path in Path.home().glob(pattern) if path.is_dir()),
+            key=_version_key,
+            reverse=True,
+        )
     except OSError:
         return []
 
@@ -177,7 +187,7 @@ def dsh_bin(configured: Path | None = None) -> Path:
 
     raise DiscoveryError(
         "找不到 @deepseek-ai/dsh 的 lib/bin.js：先执行 `npm i -g @deepseek-ai/dsh`，"
-        "或用 --dsh-bin / WEBLAUNCHER_DSH_DSH_BIN 指定"
+        "或用 --dsh-bin / WEBLAUNCHER_DSH_BIN 指定"
     )
 
 

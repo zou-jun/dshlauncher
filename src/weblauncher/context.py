@@ -101,7 +101,7 @@ class Runtime:
             if other == service_id:
                 continue
             section = self.config.section(other)
-            configured = section.get("port")
+            configured = section.get("port", self.config.raw.get("port"))
             if isinstance(configured, int):
                 ports.add(configured)
             state = state_mod.read_state(self.paths.service(other).state)

@@ -98,8 +98,13 @@ def report(
         controller = context.service()
         settings = context.settings
         rows.append((f"{prefix} · 端口", _port_text(controller, settings)))
-        for label, value in context.adapter.doctor_rows():
-            rows.append((f"{prefix} · {label}", value))
+        try:
+            adapter_rows = context.adapter.doctor_rows()
+        except Exception as exc:  # noqa: BLE001 - 依赖缺失时仍展示其余诊断
+            rows.append((f"{prefix} · 依赖", f"不可用: {exc}"))
+        else:
+            for label, value in adapter_rows:
+                rows.append((f"{prefix} · {label}", value))
         snapshot = controller.status(check_owner=True)
         pid_text = snapshot.pid if snapshot.pid is not None else "-"
         rows.append((f"{prefix} · 服务", f"{'运行中' if snapshot.running else '未运行'}, pid={pid_text}"))

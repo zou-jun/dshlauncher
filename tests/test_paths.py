@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -59,3 +61,37 @@ def test_legacy_brand_data_dir_is_renamed(tmp_path: Path, monkeypatch: pytest.Mo
         assert not old.exists()
     finally:
         paths.data_dir.cache_clear()
+
+
+def test_legacy_user_fallback_migrates_into_writable_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install = tmp_path / "install"
+    install.mkdir()
+    user_root = tmp_path / "user"
+    legacy = user_root / "dshlauncher"
+    legacy.mkdir(parents=True)
+    (legacy / "config.toml").write_text("x", "utf-8")
+    monkeypatch.delenv("WEBLAUNCHER_HOME", raising=False)
+    monkeypatch.setattr(paths, "executable_dir", lambda: install)
+    monkeypatch.setattr(paths, "_user_data_dir", lambda name="weblauncher": user_root / name)
+    paths.data_dir.cache_clear()
+    try:
+        assert paths.data_dir() == install / ".weblauncher"
+        assert (install / ".weblauncher" / "config.toml").read_text("utf-8") == "x"
+    finally:
+        paths.data_dir.cache_clear()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_runtime_dirs_and_logs_are_private(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path)
+    bundle = paths.Paths(tmp_path)
+    bundle.ensure()
+    service = bundle.service("dsh")
+    service.ensure()
+    handle = paths.open_append(service.log)
+    handle.close()
+    assert stat.S_IMODE(tmp_path.stat().st_mode) == 0o700
+    assert stat.S_IMODE(service.root.stat().st_mode) == 0o700
+    assert stat.S_IMODE(service.log.stat().st_mode) == 0o600

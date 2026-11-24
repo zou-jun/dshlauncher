@@ -5,6 +5,25 @@ from __future__ import annotations
 from . import browser
 from .context import ServiceContext
 from .splash import SplashServer
+from .tickets import TicketServer
+
+
+def _open_url(context: ServiceContext, url: str, *, dedupe: bool | None = None) -> str:
+    """用一次性 ticket 打开目标 URL，避免服务 token 出现在 Chromium argv。"""
+    ticket = TicketServer(url)
+    ticket.start()
+    try:
+        result = browser.launch(
+            context.settings,
+            ticket.url,
+            backend=context.backend,
+            dedupe=dedupe,
+        )
+    except Exception:
+        ticket.close()
+        raise
+    ticket.close_later(15.0)
+    return result
 
 
 def open_service(context: ServiceContext) -> str:
@@ -15,7 +34,7 @@ def open_service(context: ServiceContext) -> str:
     if live and state is not None:
         url = state.url or controller.latest_url()
         if url:
-            result = browser.launch(context.settings, url, backend=context.backend)
+            result = _open_url(context, url)
             return f"pid={state.pid} started=False window={result}"
 
     if not context.spec.use_splash:
@@ -25,7 +44,7 @@ def open_service(context: ServiceContext) -> str:
             raise RuntimeError(
                 f"服务已启动但没有可用的 URL，请查看日志：{context.paths.service(context.service_id).log}"
             )
-        window = browser.launch(context.settings, url, backend=context.backend)
+        window = _open_url(context, url)
         return f"pid={state.pid} started={started} window={window}"
 
     splash = SplashServer(title=context.spec.label)
@@ -63,6 +82,5 @@ def open_service(context: ServiceContext) -> str:
 
 def restart(context: ServiceContext) -> str:
     controller = context.service()
-    controller.stop()
-    state = controller.start()
+    state = controller.restart()
     return f"pid={state.pid}"

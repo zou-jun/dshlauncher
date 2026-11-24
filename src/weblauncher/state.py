@@ -23,6 +23,8 @@ class State:
 def read_state(path: Path) -> State | None:
     try:
         data = json.loads(path.read_text("utf-8"))
+        if not isinstance(data, dict):
+            return None
         extra = data.get("extra")
         return State(
             int(data["pid"]),

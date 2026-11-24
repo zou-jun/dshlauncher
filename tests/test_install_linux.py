@@ -20,4 +20,16 @@ def test_entry_runs_tray(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert entry in written
     text = entry.read_text("utf-8")
     assert "Exec=/usr/bin/python3 -m weblauncher tray" in text
-    assert "Name=dsh web" in text
+    assert "Name=Web 服务启动器" in text
+
+
+def test_install_removes_legacy_application_entries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(linux, "applications_dir", lambda: tmp_path)
+    monkeypatch.setattr(linux, "_desktop_dirs", lambda: [])
+    monkeypatch.setattr(linux, "install_icon", lambda icon: None)
+    monkeypatch.setattr(linux, "gui_command", lambda: ["/usr/bin/python3", "-m", "weblauncher"])
+    legacy = tmp_path / "dsh.desktop"
+    legacy.write_text("old", "utf-8")
+    linux.create()
+    assert not legacy.exists()
+    assert (tmp_path / "weblauncher.desktop").exists()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -48,6 +49,12 @@ class TrayController:
         with self._busy:
             return work()
 
+    @contextlib.contextmanager
+    def held(self):
+        """阻塞等待并持有动作锁；用于“停止全部”等待启动完成。"""
+        with self._busy:
+            yield
+
     def status_short(self) -> str:
         return "启动中" if self._starting.is_set() else state_text(self.service)
 
@@ -80,7 +87,9 @@ class TrayController:
 
     def open_log(self) -> str:
         self.paths.ensure()
-        log = self.paths.service(self.context.service_id).log
+        service_paths = self.paths.service(self.context.service_id)
+        service_paths.ensure()
+        log = service_paths.log
         log.touch(exist_ok=True)
         self.context.backend.open_path(log)
         return f"已打开 {log}"

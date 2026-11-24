@@ -83,3 +83,18 @@ def test_base_url_is_normalized(isolated: Path) -> None:
 def test_fixed_token_from_env(isolated: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WEBLAUNCHER_JUPYTER_TOKEN", "fixed")
     assert settings.load().token == "fixed"
+
+
+def test_documented_jupyter_bin_env_is_read(isolated: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WEBLAUNCHER_JUPYTER_BIN", "C:/tools/jupyter-lab.exe")
+    assert settings.load().jupyter_bin == Path("C:/tools/jupyter-lab.exe")
+
+
+def test_first_workdir_write_keeps_per_directory_kernel(tmp_path: Path) -> None:
+    from weblauncher.services.jupyter import workdirs
+
+    workdir = tmp_path / "notebooks"
+    workdir.mkdir()
+    memory: dict = {}
+    workdirs.remember(memory, workdir, "local")
+    assert memory["jupyter"]["workdir_kernels"][str(workdir.resolve())] == "local"

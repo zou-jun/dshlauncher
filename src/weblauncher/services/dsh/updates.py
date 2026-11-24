@@ -168,7 +168,7 @@ def _find_package(bin_js: Path) -> tuple[Path, dict[str, Any]]:
         manifest = parent / "package.json"
         try:
             data = json.loads(manifest.read_text("utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, ValueError):
             continue
         if isinstance(data, dict) and data.get("name") and data.get("version"):
             return parent, data
@@ -188,7 +188,7 @@ def installed_plugin_version(profile: Path, name: str) -> str:
     manifest = profile / "node_modules" / Path(name) / "package.json"
     try:
         data = json.loads(manifest.read_text("utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
         return ""
     return str(data.get("version") or "") if isinstance(data, dict) else ""
 
@@ -477,7 +477,7 @@ def _profile_report(
         manifest = json.loads(manifest_path.read_text("utf-8"))
     except FileNotFoundError:
         return ProfileReport(profile, str(directory), 0, error=f"profile 未初始化：{manifest_path}")
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         return ProfileReport(profile, str(directory), 0, error=f"读取 {manifest_path} 失败：{exc}")
     if not isinstance(manifest, dict):
         return ProfileReport(profile, str(directory), 0, error=f"{manifest_path} 不是对象")

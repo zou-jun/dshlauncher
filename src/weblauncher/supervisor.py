@@ -11,12 +11,13 @@ import socket
 import time
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 
 import psutil
 
 from . import logs, platform, ports, process
 from . import state as state_mod
-from .paths import Paths, ServicePaths
+from .paths import Paths, ServicePaths, open_append
 from .services.base import LaunchPlan, ServiceAdapter, ServiceSpec
 from .state import State
 from .status import ServiceStatus
@@ -41,6 +42,33 @@ class Supervisor:
         self.backend = backend or platform.load()
         self._other_ports = other_ports or (lambda: set())
         self.start_timeout = float(getattr(self.settings, "start_timeout", 120.0))
+        self._lock_depth = 0
+        self._lock: process.ServiceLock | None = None
+
+    @contextlib.contextmanager
+    def _locked(self):
+        """序列化同一服务的跨进程 start/stop/restart；实例内可重入。"""
+        if self._lock_depth:
+            self._lock_depth += 1
+            try:
+                yield
+            finally:
+                self._lock_depth -= 1
+            return
+        lock = process.ServiceLock(
+            self.service_paths.lock,
+            timeout=self.start_timeout + STOP_TIMEOUT + 5.0,
+            label=self.spec.label,
+        )
+        lock.acquire()
+        self._lock = lock
+        self._lock_depth = 1
+        try:
+            yield
+        finally:
+            self._lock_depth = 0
+            self._lock = None
+            lock.release()
 
     # ── 端口 ──────────────────────────────────────────────────────────
     def effective_port(self) -> int:
@@ -79,8 +107,13 @@ class Supervisor:
     # ── 状态文件 / 日志 ────────────────────────────────────────────────
     def port_open(self, port: int | None = None, timeout: float = 0.3) -> bool:
         port = int(self.settings.port) if port is None else port
+        host = str(self.settings.host)
+        if host in {"0.0.0.0", ""}:
+            host = "127.0.0.1"
+        elif host == "::":
+            host = "::1"
         try:
-            with socket.create_connection((self.settings.host, port), timeout=timeout):
+            with socket.create_connection((host, port), timeout=timeout):
                 return True
         except OSError:
             return False
@@ -179,6 +212,10 @@ class Supervisor:
         return state
 
     def start(self) -> State:
+        with self._locked():
+            return self._start_locked()
+
+    def _start_locked(self) -> State:
         existing = self.read_state()
         if existing is not None and self.live_process(existing) is not None:
             moving = getattr(self.settings, "port_explicit", False) and int(self.settings.port) not in {
@@ -232,7 +269,7 @@ class Supervisor:
         return state
 
     def _spawn(self, plan: LaunchPlan, port: int) -> State:
-        log = self.service_paths.log.open("ab", buffering=0)
+        log = open_append(self.service_paths.log, binary=True)
         try:
             if plan.marker:
                 log.write(
@@ -297,6 +334,10 @@ class Supervisor:
         process.kill_tree(pid)
 
     def stop(self, *, force: bool = False) -> bool:
+        with self._locked():
+            return self._stop_locked(force=force)
+
+    def _stop_locked(self, *, force: bool = False) -> bool:
         state = self.read_state()
         proc = self.live_process(state)
         targets: list[psutil.Process] = []
@@ -329,7 +370,7 @@ class Supervisor:
                 graceful = bool(self.adapter.request_stop(state))
         if graceful:
             self._wait_port_closed(port)
-            if not self.port_open(port):
+            if not self.port_open(port) and self.live_process(state) is None:
                 self.service_paths.state.unlink(missing_ok=True)
                 return True
 
@@ -347,10 +388,17 @@ class Supervisor:
 
     def ensure(self) -> tuple[State, bool]:
         """保证服务在跑并返回 (state, 是否本次新启动)。"""
-        state = self.read_state()
-        if state is not None and self.live_process(state) is not None:
-            return self._reuse(state), False
-        return self.start(), True
+        with self._locked():
+            state = self.read_state()
+            if state is not None and self.live_process(state) is not None:
+                return self._reuse(state), False
+            return self._start_locked(), True
+
+    def restart(self) -> State:
+        """在同一个锁内 stop + start，避免中间被其它进程插队。"""
+        with self._locked():
+            self._stop_locked()
+            return self._start_locked()
 
     # ── 展示 ──────────────────────────────────────────────────────────
     def status(self, *, check_ports: bool = True, check_owner: bool = False) -> ServiceStatus:
@@ -364,6 +412,9 @@ class Supervisor:
             url = state.url if state is not None and state.url else self.latest_url()
         owner = self.port_owner(port) if check_owner and not running and listening else None
         extra = self.adapter.status_extra(state) if state is not None else {}
+        work_dir = self.adapter.work_dir()
+        if running and extra.get("root_dir"):
+            work_dir = Path(extra["root_dir"])
         return ServiceStatus(
             running=running,
             pid=proc.pid if proc is not None else None,
@@ -371,7 +422,7 @@ class Supervisor:
             port=port,
             listening=listening,
             url=url,
-            work_dir=self.adapter.work_dir(),
+            work_dir=work_dir,
             data_dir=self.service_paths.root,
             log_path=self.service_paths.log,
             owner=owner,

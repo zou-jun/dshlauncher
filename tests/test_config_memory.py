@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from weblauncher import config, memory
 
 
@@ -70,3 +72,17 @@ def test_memory_corrupt_file_is_ignored(tmp_path: Path) -> None:
     path = tmp_path / "memory.toml"
     path.write_text("not [valid", "utf-8")
     assert memory.load(path) == {}
+
+
+def test_config_list_prints_raw_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    from weblauncher import paths
+    from weblauncher.__main__ import main
+
+    monkeypatch.setenv("WEBLAUNCHER_HOME", str(tmp_path))
+    paths.data_dir.cache_clear()
+    (tmp_path / "config.toml").write_text("[[x]]\na = 1\n", "utf-8")
+    try:
+        assert main(["config", "list"]) == 0
+    finally:
+        paths.data_dir.cache_clear()
+    assert "[[x]]" in capsys.readouterr().out

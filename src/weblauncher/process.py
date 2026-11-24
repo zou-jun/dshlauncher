@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import contextlib
+import json
+import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +41,86 @@ def alive(pid: int, create_time: float) -> bool:
         return abs(proc.create_time() - create_time) < 1.0
     except (psutil.Error, OSError):
         return False
+
+
+class ServiceLock:
+    """跨进程服务动作锁：一次只允许一个 start/stop/restart。
+
+    锁文件放在 ``services/<id>/service.lock``；持有者用 pid + create_time 校验，
+    进程崩溃后下一次操作会自动清理。
+    """
+
+    def __init__(self, path: Path, *, timeout: float, label: str) -> None:
+        self.path = path
+        self.timeout = timeout
+        self.label = label
+        self.pid = os.getpid()
+        self.create_time = psutil.Process().create_time()
+        self._held = False
+
+    def _holder(self) -> tuple[int, float] | None:
+        try:
+            data = json.loads(self.path.read_text("utf-8"))
+            return int(data["pid"]), float(data["create_time"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+    def _fresh(self) -> bool:
+        try:
+            return time.time() - self.path.stat().st_mtime < 5.0
+        except OSError:
+            return False
+
+    def acquire(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + self.timeout
+        while True:
+            try:
+                fd = os.open(
+                    self.path,
+                    os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0),
+                    0o600,
+                )
+            except FileExistsError:
+                holder = self._holder()
+                if holder is not None and alive(*holder):
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(f"另一个 {self.label} 操作正在进行，请稍后重试") from None
+                    time.sleep(0.1)
+                    continue
+                if holder is None and self._fresh():
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(f"另一个 {self.label} 操作正在进行，请稍后重试") from None
+                    time.sleep(0.1)
+                    continue
+                with contextlib.suppress(OSError):
+                    self.path.unlink(missing_ok=True)
+                continue
+            try:
+                os.write(
+                    fd,
+                    json.dumps({"pid": self.pid, "create_time": self.create_time}).encode(),
+                )
+            finally:
+                os.close(fd)
+            self._held = True
+            return
+
+    def release(self) -> None:
+        if not self._held:
+            return
+        self._held = False
+        holder = self._holder()
+        if holder is not None and holder[0] == self.pid and abs(holder[1] - self.create_time) < 1.0:
+            with contextlib.suppress(OSError):
+                self.path.unlink(missing_ok=True)
+
+    def __enter__(self) -> ServiceLock:
+        self.acquire()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.release()
 
 
 def spawn(

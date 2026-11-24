@@ -124,7 +124,7 @@ def test_quit_stops_service_then_icon(data_dir: Path, monkeypatch: pytest.Monkey
     app = _app(data_dir)
     events: list[str] = []
 
-    monkeypatch.setattr(app, "_batch", lambda action: events.append("service") or "ok")
+    monkeypatch.setattr(app, "_batch", lambda action, **kwargs: events.append("service") or "ok")
 
     class FakeIcon:
         def stop(self) -> None:
@@ -141,7 +141,7 @@ def test_quit_still_stops_icon_when_service_stop_fails(
     app = _app(data_dir)
     events: list[str] = []
 
-    def boom(action: str) -> str:
+    def boom(action: str, **kwargs: object) -> str:
         raise RuntimeError("boom")
 
     class FakeIcon:
@@ -266,3 +266,14 @@ def test_exclusive_releases_controller_after_work(data_dir: Path) -> None:
     assert calls == ["work"]
     assert controller._busy.acquire(blocking=False)
     controller._busy.release()
+
+
+def test_open_log_creates_service_directory(tmp_path: Path) -> None:
+    opened: list[Path] = []
+    backend = SimpleNamespace(open_path=lambda path: opened.append(path))
+    app = _app(tmp_path, backend)
+    controller = app.controllers["dsh"]
+    controller.open_log()
+    log = paths.Paths(tmp_path).service("dsh").log
+    assert log.is_file()
+    assert opened == [log]
