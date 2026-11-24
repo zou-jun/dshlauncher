@@ -43,7 +43,7 @@ class JupyterAdapter:
         stop_untracked=False,
         supports_updates=False,
         open_on_start=False,
-        console_links=(("Jupyter 配置", "/#/jupyter"), ("Jupyter 设置", "/#/settings/jupyter")),
+        console_tools=(("kernels", "内核"), ("workdirs", "工作目录")),
     )
 
     def __init__(

@@ -1,9 +1,16 @@
-import { api, state, esc, toast, shell, pageHead, openModal } from "../core.js";
+import {
+  api, state, esc, toast, shell, pageHead, openModal, breadcrumb, serviceTabs, servicePath,
+} from "../core.js";
 
 export async function loadJupyter() {
-  const data = await api("/api/jupyter/kernels");
-  if (state.route !== "/jupyter") return;
+  const target = servicePath("jupyter", "kernels");
+  const [data, service] = await Promise.all([
+    api("/api/jupyter/kernels"),
+    api("/api/services/jupyter"),
+  ]);
+  if (state.route !== target) return;
   state.kernels = data.kernels || [];
+  state.service = service;
   const rows = state.kernels.map((kernel) => `<tr>
     <td><strong>${esc(kernel.name)}</strong>${kernel.default ? ` <span class="pill ok">默认</span>` : ""}</td>
     <td>${esc(kernel.display_name || "—")}</td>
@@ -14,10 +21,14 @@ export async function loadJupyter() {
       <button class="btn small ghost" data-kact="rename" data-kernel="${esc(kernel.name)}">改名</button>
       <button class="btn small danger" data-kact="remove" data-kernel="${esc(kernel.name)}" data-managed="${kernel.managed ? "1" : ""}">删除</button></td>
   </tr>`).join("");
-  shell(`${pageHead("Jupyter 配置", "内核注册与工作目录。修改默认内核会记住当前工作目录。",
-    `<a class="btn ghost" href="#/">返回总览</a>
-     <a class="btn ghost" href="#/settings/jupyter">Jupyter 设置</a>
-     <a class="btn ghost" href="#/jupyter/workdirs">工作目录</a><button class="btn ghost" data-refresh="jupyter">刷新</button>`)}
+  const crumbs = breadcrumb([
+    { label: "总览", path: "/" },
+    { label: service.label, path: servicePath("jupyter") },
+    { label: "内核" },
+  ]);
+  shell(`${crumbs}${pageHead("Jupyter 内核", "内核注册与选择。修改默认内核会记住当前工作目录。",
+    `<button class="btn ghost" data-refresh="jupyter">刷新</button>`)}
+    ${serviceTabs(service, "kernels")}
     <div class="card"><div class="spread"><h2>已安装内核</h2><span class="small muted">${state.kernels.length} 个</span></div>
       <div class="table-wrap"><table><thead><tr><th>内核</th><th>显示名</th><th>Python</th><th>状态</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="5" class="muted">没有找到内核</td></tr>`}</tbody></table></div>
     </div>
@@ -31,20 +42,31 @@ export async function loadJupyter() {
           <label class="check"><input id="kernel-install" type="checkbox"> 缺 ipykernel 时安装</label></div>
       </div>
       <div class="row" style="margin-top:12px"><button class="btn primary" data-kernel-add="1">注册内核</button></div>
-    </div>`, "/jupyter");
+    </div>`, target);
 }
 
 export async function loadWorkdirs() {
-  const data = await api("/api/jupyter/workdirs");
-  if (state.route !== "/jupyter/workdirs") return;
+  const target = servicePath("jupyter", "workdirs");
+  const [data, service] = await Promise.all([
+    api("/api/jupyter/workdirs"),
+    api("/api/services/jupyter"),
+  ]);
+  if (state.route !== target) return;
   state.workdirs = data;
+  state.service = service;
   const rows = (data.items || []).map((item) => `<tr>
     <td class="mono">${esc(item.path)}${item.current ? ` <span class="pill ok">当前</span>` : ""}</td>
     <td>${item.exists ? "存在" : `<span class="muted">不存在</span>`}</td>
     <td class="actions"><button class="btn small" data-workdir="${esc(item.path)}">切换到此目录</button></td>
   </tr>`).join("");
-  shell(`${pageHead("Jupyter 工作目录", `当前：<span class="mono">${esc(data.current || "—")}</span>`,
-    `<a class="btn ghost" href="#/jupyter">内核</a><button class="btn ghost" data-refresh="workdirs">刷新</button>`)}
+  const crumbs = breadcrumb([
+    { label: "总览", path: "/" },
+    { label: service.label, path: servicePath("jupyter") },
+    { label: "工作目录" },
+  ]);
+  shell(`${crumbs}${pageHead("Jupyter 工作目录", `当前：<span class="mono">${esc(data.current || "—")}</span>`,
+    `<button class="btn ghost" data-refresh="workdirs">刷新</button>`)}
+    ${serviceTabs(service, "workdirs")}
     <div class="card"><div class="spread"><h2>最近目录</h2><span class="small muted">最多保留 10 个</span></div>
       <div class="table-wrap"><table><thead><tr><th>目录</th><th>状态</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="3" class="muted">还没有记录过工作目录</td></tr>`}</tbody></table></div>
     </div>
@@ -52,7 +74,7 @@ export async function loadWorkdirs() {
       <div class="form-row"><label class="field grow"><span>工作目录</span><div class="row"><input id="workdir-path" value="${esc(data.current || "")}" class="grow"><button class="btn small ghost" data-workdir-picker="dir">浏览</button></div></label>
         <label class="field"><span>默认内核（可选）</span><input id="workdir-kernel" placeholder="python3"></label><button class="btn primary" data-workdir-use="1">应用</button></div>
       <div class="small muted" style="margin-top:9px">切换后需要重启 Jupyter 才会改变服务端 root_dir；已有 notebook 不受影响。</div>
-    </div>`, "/jupyter");
+    </div>`, target);
 }
 
 export async function kernelAction(action, name, extra = {}) {

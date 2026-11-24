@@ -4,10 +4,11 @@ import {
 import { loadOverview } from "./pages/overview.js";
 import { loadService } from "./pages/service.js";
 import { loadLogs, loadLogPage, stopLogTimer } from "./pages/logs.js";
-import { loadSettings, saveConfigValue, saveRawConfig } from "./pages/settings.js";
+import { loadServiceSettings } from "./pages/service_settings.js";
+import { loadLauncherSettings, loadAdvancedSettings, saveConfigValue, saveRawConfig } from "./pages/settings.js";
 import { loadUpdates, startUpgrade, buildTargets } from "./pages/updates.js";
 import { loadJupyter, loadWorkdirs, kernelAction } from "./pages/jupyter.js";
-import { loadDoctor } from "./pages/doctor.js";
+import { loadLauncherDiagnostics, loadServiceDiagnostics } from "./pages/diagnostics.js";
 import { loadAbout } from "./pages/about.js";
 
 // ── 动作 / 路由 / 事件 ────────────────────────────────────────────────
@@ -41,26 +42,57 @@ async function refreshRoute() {
   try { await route(); } catch (error) { toast(error.message, "err"); }
 }
 
+const LEGACY_ROUTES = [
+  [/^\/logs\/([^/]+)$/, (match) => `/services/${match[1]}/logs`],
+  [/^\/settings\/([^/]+)$/, (match) => `/services/${match[1]}/settings`],
+  [/^\/updates$/, () => "/services/dsh/updates"],
+  [/^\/jupyter\/workdirs$/, () => "/services/jupyter/workdirs"],
+  [/^\/jupyter$/, () => "/services/jupyter"],
+  [/^\/doctor$/, () => "/diagnostics"],
+];
+
+function legacyTarget(path) {
+  if (path === "/settings/advanced") return null;
+  for (const [pattern, target] of LEGACY_ROUTES) {
+    const match = path.match(pattern);
+    if (match) return target(match);
+  }
+  return null;
+}
+
 async function route() {
   stopLogTimer();
   const rawPath = location.hash.slice(1) || "/";
   const [path, queryString = ""] = rawPath.split("?");
+  const redirect = legacyTarget(path);
+  if (redirect) {
+    location.replace(`#${redirect}${queryString ? `?${queryString}` : ""}`);
+    return;
+  }
   const query = new URLSearchParams(queryString);
-  if (path === "/updates") {
+  if (path === "/services/dsh/updates") {
     if (query.get("profile")) sessionStorage.setItem("updates.profile", query.get("profile"));
     if (query.get("timeout")) sessionStorage.setItem("updates.timeout", query.get("timeout"));
   }
   state.route = path;
+  const parts = path.split("/").filter(Boolean);
   if (path === "/" || path === "") return loadOverview();
-  if (path === "/updates") return loadUpdates();
-  if (path === "/jupyter") return loadJupyter();
-  if (path === "/jupyter/workdirs") return loadWorkdirs();
-  if (path === "/settings") return loadSettings();
-  if (path.startsWith("/settings/")) return loadSettings(decodeURIComponent(path.split("/")[2] || ""));
-  if (path === "/doctor") return loadDoctor();
+  if (path === "/diagnostics") return loadLauncherDiagnostics();
+  if (path === "/settings") return loadLauncherSettings();
+  if (path === "/settings/advanced") return loadAdvancedSettings();
   if (path === "/about") return loadAbout();
-  if (path.startsWith("/logs/")) return loadLogPage(decodeURIComponent(path.split("/")[2] || ""));
-  if (path.startsWith("/services/")) return loadService(decodeURIComponent(path.split("/")[2] || ""));
+  if (parts[0] === "services" && parts[1]) {
+    const id = decodeURIComponent(parts[1]);
+    const child = parts[2] ? decodeURIComponent(parts[2]) : "";
+    if (!child) return loadService(id);
+    if (child === "logs") return loadLogPage(id);
+    if (child === "diagnostics") return loadServiceDiagnostics(id);
+    if (child === "settings") return loadServiceSettings(id);
+    if (child === "updates" && id === "dsh") return loadUpdates();
+    if (child === "kernels" && id === "jupyter") return loadJupyter();
+    if (child === "workdirs" && id === "jupyter") return loadWorkdirs();
+    return loadService(id);
+  }
   return loadOverview();
 }
 
@@ -79,15 +111,18 @@ document.addEventListener("click", async (event) => {
     if (target.dataset.refresh === "overview") return loadOverview();
     if (target.dataset.refresh === "service") return loadService(target.dataset.service);
     if (target.dataset.refresh === "logs") return loadLogs(target.dataset.service || state.logService).catch((error) => toast(error.message, "err"));
-    if (target.dataset.refresh === "settings") return loadSettings(state.configScope);
+    if (target.dataset.refresh === "settings") return loadLauncherSettings();
+    if (target.dataset.refresh === "advanced") return loadAdvancedSettings();
+    if (target.dataset.refresh === "service-settings") return loadServiceSettings(target.dataset.service);
+    if (target.dataset.refresh === "diagnostics") return loadLauncherDiagnostics();
+    if (target.dataset.refresh === "service-diagnostics") return loadServiceDiagnostics(target.dataset.service);
     if (target.dataset.refresh === "jupyter") return loadJupyter();
     if (target.dataset.refresh === "workdirs") return loadWorkdirs();
-    if (target.dataset.refresh === "doctor") return loadDoctor();
     if (target.dataset.cfgSave) return saveConfigValue(target.dataset.cfgSave);
     if (target.dataset.cfgUnset) {
       if (!confirm(`删除配置项 ${target.dataset.cfgUnset}？`)) return;
       await api("/api/config/value", { method: "DELETE", body: { key: target.dataset.cfgUnset } });
-      toast("配置项已删除", "ok"); return loadSettings(state.configScope);
+      toast("配置项已删除", "ok"); return refreshRoute();
     }
     if (target.dataset.cfgRaw) return saveRawConfig();
     if (target.dataset.picker) {
@@ -119,7 +154,7 @@ document.addEventListener("click", async (event) => {
     }
     if (target.dataset.workdirPicker) {
       const input = q("workdir-path");
-      return openPicker(input.value || "", false, (value) => { input.value = value; });
+      return openPicker("", false, (value) => { input.value = value; });
     }
     if (target.dataset.workdirUse) {
       const body = { path: q("workdir-path").value.trim(), kernel: q("workdir-kernel").value.trim() || undefined };

@@ -1,4 +1,4 @@
-import { state, esc, api, shell, pageHead, empty } from "../core.js";
+import { state, esc, api, shell, pageHead, empty, servicePath } from "../core.js";
 import { pill } from "./status.js";
 
 export async function loadOverview() {
@@ -23,8 +23,6 @@ export async function loadOverview() {
 function serviceCard(service) {
   const url = service.url ? `<div class="meta-value mono">${esc(service.url)}</div>` : `<div class="meta-value muted">未运行</div>`;
   const root = service.work_dir || service.root_dir;
-  const links = (service.links || []).map((link) =>
-    `<a class="btn ghost small" href="${esc(link.href)}">${esc(link.label)}</a>`).join("");
   const unavailable = Boolean(service.error);
   return `<article class="card service-card">
     <div class="service-top"><div>
@@ -40,14 +38,12 @@ function serviceCard(service) {
     ${service.error ? `<div class="notice small">${esc(service.error)}</div>` : ""}
     ${unavailable ? `<div class="card-actions"><span class="small muted">修正配置后刷新</span></div>` : `
     <div class="card-actions">
-      <button class="btn primary" data-act="open" data-service="${esc(service.id)}">打开</button>
+      <a class="btn primary" href="#${servicePath(service.id)}">进入服务</a>
+      <button class="btn" data-act="open" data-service="${esc(service.id)}">打开</button>
       ${service.running
         ? `<button class="btn" data-act="stop" data-service="${esc(service.id)}">停止</button>
            <button class="btn" data-act="restart" data-service="${esc(service.id)}">重启</button>`
         : `<button class="btn" data-act="start" data-service="${esc(service.id)}">启动</button>`}
-      <a class="btn ghost" href="#/services/${encodeURIComponent(service.id)}">详情</a>
-      <a class="btn ghost small" href="#/logs/${encodeURIComponent(service.id)}">日志</a>
     </div>`}
-    ${links ? `<div class="service-links"><span class="tiny muted">服务功能</span>${links}</div>` : ""}
   </article>`;
 }

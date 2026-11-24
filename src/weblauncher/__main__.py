@@ -336,7 +336,7 @@ def _cmd_dsh_updates(args: argparse.Namespace) -> int:
     runtime = _runtime()
     context = runtime.context("dsh", _dsh_options(args))
     if args.panel:
-        target = f"/#/updates?profile={quote(args.profile)}&timeout={quote(str(args.timeout))}"
+        target = f"/#/services/dsh/updates?profile={quote(args.profile)}&timeout={quote(str(args.timeout))}"
         try:
             url = tray.send_ui(
                 runtime.paths,

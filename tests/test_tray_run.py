@@ -16,6 +16,16 @@ def _runtime(tmp_path: Path, backend: object | None = None) -> Runtime:
     return Runtime.create(paths_=paths.Paths(tmp_path), backend=backend, migrate=False)
 
 
+def test_console_settings_can_use_daily_chrome(tmp_path: Path) -> None:
+    (tmp_path / "config.toml").write_text(
+        '[ui]\nsingle_window = true\nsingle_window_profile = "daily"\n',
+        "utf-8",
+    )
+    settings = tray_app.console_settings(_runtime(tmp_path))
+    assert settings.single_window is True
+    assert settings.daily_profile is True
+
+
 def test_run_opens_existing_console(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sent: list[tuple[float, float, str]] = []
     opened: list[str] = []
@@ -27,9 +37,9 @@ def test_run_opens_existing_console(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(tray_app, "send_ui", fake_send)
     monkeypatch.setattr(tray_app, "open_console_url", lambda runtime, url: opened.append(url) or "new")
 
-    assert tray_app.run(_runtime(tmp_path), target="/#/updates") == 0
+    assert tray_app.run(_runtime(tmp_path), target="/#/services/dsh/updates") == 0
     assert sent[0][1] == 0.0
-    assert sent[0][2] == "/#/updates"
+    assert sent[0][2] == "/#/services/dsh/updates"
     assert opened == ["http://127.0.0.1:1/boot/ticket"]
 
 

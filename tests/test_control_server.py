@@ -113,17 +113,29 @@ def test_doctor_splits_general_and_services(console) -> None:
     )
 
 
-def test_service_cards_expose_custom_links(console) -> None:
+def test_doctor_can_scope_to_general_only(console) -> None:
+    server, cookie, _ = console
+    status, payload = _call(server, cookie, "/api/doctor", method="POST", body={"services": []})
+    assert status == 202
+    for _ in range(30):
+        status, job = _call(server, cookie, f"/api/jobs/{payload['id']}")
+        if job["status"] != "running":
+            break
+    assert job["status"] == "succeeded"
+    assert {"启动器", "Python"} <= {row["name"] for row in job["result"]["general"]}
+    assert job["result"]["services"] == []
+
+
+def test_service_cards_expose_relative_tools(console) -> None:
     server, cookie, _ = console
     status, payload = _call(server, cookie, "/api/services")
     assert status == 200
-    links = {
-        item["id"]: {(link["label"], link["href"]) for link in item["links"]} for item in payload["services"]
+    tools = {
+        item["id"]: {(tool["slug"], tool["label"]) for tool in item["tools"]} for item in payload["services"]
     }
-    assert ("dsh 更新", "/#/updates") in links["dsh"]
-    assert ("dsh 设置", "/#/settings/dsh") in links["dsh"]
-    assert ("Jupyter 配置", "/#/jupyter") in links["jupyter"]
-    assert ("Jupyter 设置", "/#/settings/jupyter") in links["jupyter"]
+    assert ("updates", "更新") in tools["dsh"]
+    assert ("kernels", "内核") in tools["jupyter"]
+    assert ("workdirs", "工作目录") in tools["jupyter"]
 
 
 def test_unavailable_service_stays_in_overview(tmp_path: Path) -> None:
@@ -138,7 +150,7 @@ def test_unavailable_service_stays_in_overview(tmp_path: Path) -> None:
     assert set(by_id) == {"dsh", "jupyter"}
     assert by_id["jupyter"]["status"] == "error"
     assert by_id["jupyter"]["label"] == "Jupyter Lab"
-    assert by_id["jupyter"]["links"]
+    assert by_id["jupyter"]["tools"]
     assert "配置无效" in by_id["jupyter"]["error"]
 
 

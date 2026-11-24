@@ -6,9 +6,9 @@
 - **CLI**：短命；通过 `Runtime` 读取同一份配置/记忆，直接调用服务层；`ui` 只负责打开控制台。
 - **被托管服务**：每个服务是一个独立分离进程（dsh = node，Jupyter = uv tool 的 python），
   关闭终端/控制台窗口不影响；Agent 退出可选择保留或停止。Agent 启动只打开控制台，不自动拉起任何服务。
-- **控制台信息架构**：左侧栏只放启动器通用功能；dsh 更新/设置、Jupyter 配置/设置挂在总览对应服务卡片。
-  日志在 Web 页读取，诊断和设置都按「启动器通用 / 服务独立」分组。
-- **浏览器窗口**：默认控制台使用独立 `control-browser/` profile，每个服务使用自己的 Chromium `--user-data-dir`；`[ui] single_window = true` 时统一使用 `tabbed-browser/`，控制台和服务是同一普通窗口里的标签页。
+- **控制台信息架构**：左侧栏按「服务 / 配置 / 其他」分组，图标用强调色、警告色、成功色区分；
+  每个服务拥有自己的子树，日志、诊断、设置和服务工具都在 `#/services/<id>/` 下，页面内不使用跨服务的平级快捷入口。
+- **浏览器窗口**：默认控制台使用独立 `control-browser/` profile，每个服务使用自己的 Chromium `--user-data-dir`；`[ui] single_window = true` 时统一使用 `tabbed-browser/` 或日常 Chrome 的默认 profile，控制台和服务是同一普通窗口里的标签页。
 
 ```mermaid
 flowchart TB
@@ -32,6 +32,36 @@ flowchart TB
   Agent --> Locks[single / ipc / per-service locks]
 ```
 
+## 控制台信息架构
+
+```
+#/
+├─ #/diagnostics                  启动器诊断（仅 general）
+├─ #/settings                     启动器设置（[launcher] / [ui]）
+│  └─ #/settings/advanced         全量 TOML
+├─ #/services/<id>                服务详情 / 子树根
+│  ├─ #/services/<id>/logs
+│  ├─ #/services/<id>/diagnostics
+│  ├─ #/services/<id>/settings
+│  ├─ #/services/dsh/updates
+│  └─ #/services/jupyter/kernels
+│     #/services/jupyter/workdirs
+└─ #/about
+```
+
+- 路由只认 canonical 路径；旧路径在 `app.js` 的 `LEGACY_ROUTES` 中保留 query 后 `location.replace`。
+- 服务页统一从 `ServiceSpec.console_tools` 取服务专属标签；元数据只给相对 slug，不保存绝对 URL。
+- `ServiceSpec.console_tools` 为 `(slug, label)` 元组，例如 dsh 的 `("updates", "更新")`、
+  Jupyter 的 `("kernels", "内核")` / `("workdirs", "工作目录")`；前端用 `servicePath(id, slug)` 生成链接。
+- 每个页面调用 `shell()` 时同时传面包屑和服务标签，保证从任意子页面都能回到总览或服务根。
+
+## 单窗口浏览器配置
+
+- `[ui] single_window = true` 时，控制台与服务必须使用同一个浏览器 profile 才能追加到同一窗口。
+- `single_window_profile = "tabbed"`（默认）：使用数据目录下的 `tabbed-browser/`，通过 `--user-data-dir` 隔离日常浏览数据。
+- `single_window_profile = "daily"`：不传 `--user-data-dir`，直接使用系统 Chrome 默认配置；会共享日常书签、登录状态和扩展。
+- 日常 Chrome 已在运行时，启动命令只追加标签页；未运行时首次打开普通窗口。因为无法用专用 profile 定位窗口，模式不做窗口置前/尺寸纠正。
+
 ## 分层与模块
 
 | 层 | 模块 | 职责 |
@@ -52,7 +82,7 @@ flowchart TB
 | 服务层 | `services/dsh/` | node/bin.js 发现、token URL 解析、接管端口、updates/upgrade |
 | 服务层 | `services/jupyter/` | uv tool 发现、HTTP 就绪/关闭、kernelspec 注册、工作目录记忆；`operations.py` 为 CLI/HTTP 共用用例 |
 | UI | `control/` | HTTP/API 门面 + `routes` / `config_store` / `files` / `jupyter` / `updates` / `jobs` / `static_assets` |
-| UI | `webui/static/` | 无构建 ES modules：`core` + `app` 路由/事件 + `pages/` 总览/服务/日志/设置/更新/Jupyter/诊断/关于/status |
+| UI | `webui/static/` | 无构建 ES modules：`core` 共享渲染与路径助手 + `app` 路由/事件 + `pages/` 总览/服务/日志/服务设置/启动器设置/更新/Jupyter/诊断/关于/status |
 | UI | `tray/` | 最小托盘入口、单实例/IPC、Agent 生命周期 |
 | UI | `install/` | 主控制台入口 + 每服务详情快捷方式（Windows `.lnk` / Linux `.desktop`） |
 | 平台 | `platform/` | 分离进程、窗口枚举/置前、打开路径、原生消息框 |
@@ -64,7 +94,7 @@ flowchart TB
 
 ```python
 class ServiceAdapter(Protocol):
-    spec: ServiceSpec  # id / 默认端口 / 回退端口 / 是否接管
+    spec: ServiceSpec  # id / 默认端口 / 回退端口 / 是否接管 / console_tools
     settings: Any  # 该服务的配置对象（含 UI 字段）
 
     def prepare(self, *, host, port) -> LaunchPlan: ...
@@ -88,6 +118,7 @@ class ServiceAdapter(Protocol):
 | 停止 | 直接杀进程树 | `POST <base>api/shutdown`，超时才杀树 |
 | 端口占用 | 是同类 dsh 则接管 | 自动换端口，不接管 |
 | 专属命令 | `dsh updates` | `jupyter kernel` / `jupyter workdir` |
+| 控制台工具 | `updates` | `kernels` / `workdirs` |
 
 ## 数据与配置
 
@@ -98,7 +129,7 @@ class ServiceAdapter(Protocol):
   launcher.log              动作审计
   upgrades.log              dsh 升级日志
   control-browser/          Web 控制台专用浏览器配置（默认模式）
-  tabbed-browser/           单窗口模式共用的浏览器配置
+  tabbed-browser/           单窗口模式且 single_window_profile=tabbed 时使用
   tray.lock / tray.json     Agent 单实例锁与 loopback IPC
   services/
     dsh/    state.json  service.log  service.lock  browser/
@@ -118,7 +149,7 @@ class ServiceAdapter(Protocol):
 
 ## 生命周期
 
-1. 控制台启动：Agent 绑定 loopback HTTP、写入一次性入口信息；默认打开 `control-browser/` 的应用窗口，单窗口模式打开 `tabbed-browser/` 的普通标签页。
+1. 控制台启动：Agent 绑定 loopback HTTP、写入一次性入口信息；默认打开 `control-browser/` 的应用窗口，单窗口模式打开 `tabbed-browser/` 的标签页，或 `daily` 模式的日常 Chrome。
 2. `Supervisor.effective_port()`：排除其它服务端口 → 探测上次/配置/回退候选。
 3. `start()`：可信 state 且进程存活 → 复用；显式换端口 → 先停旧实例。
 4. `adapter.prepare()` 生成 argv/env/cwd；核心写 `[launcher] start` 标记后分离启动。
@@ -135,7 +166,7 @@ class ServiceAdapter(Protocol):
 - 控制器集合通过 `ServiceControllerRegistry` 的线程安全快照读取；配置重载整体替换控制器，并把无法构建的服务保留为错误占位。
 - 控制台入口是一次性 ticket：`/boot/<ticket>` 设置 HttpOnly Cookie 后跳到 SPA；写请求校验 CSRF + Host + Origin。
 - `Supervisor` 的读操作不修改实例状态；`ServiceStatus` 是一次性快照。
-- 默认模式下浏览器 dedupe 按各自 `--user-data-dir` 判定，两个服务的窗口互不干扰；单窗口模式共用 profile，后续打开只追加标签页，不做窗口置前。
+- 默认模式下浏览器 dedupe 按各自 `--user-data-dir` 判定，两个服务的窗口互不干扰；单窗口模式共用 profile，后续打开只追加标签页，不做窗口置前；daily 模式由日常 Chrome 自己决定落在哪个窗口。
 
 ## 新增一个服务
 
@@ -153,7 +184,7 @@ class ServiceAdapter(Protocol):
 ```bash
 make check                 # ruff + 全量单测
 make smoke                 # start all → status all → stop all
-make smoke-ui              # headless Chromium 跑总览/设置/服务/日志/诊断与静态模块
+make smoke-ui              # headless Chromium 跑总览/启动器设置与诊断/服务子树/旧地址重定向与静态模块
 make smoke-ui ARGS="--exe app/weblauncher.exe"  # 打包版同一套浏览器检查
 make build                 # PyInstaller 打包并部署到 app/
 weblauncher doctor         # 每个服务的依赖、端口、状态

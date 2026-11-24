@@ -40,10 +40,50 @@ export function toast(message, kind = "") {
 }
 
 export function activeNav(path) {
-  if (path.startsWith("/services/") || path.startsWith("/logs/")) return "/";
-  if (path === "/updates" || path.startsWith("/jupyter")) return "/";
-  if (path.startsWith("/settings/")) return "/settings";
+  if (path.startsWith("/services/")) return "/";
+  if (path === "/diagnostics") return "/diagnostics";
+  if (path === "/settings" || path.startsWith("/settings/")) return "/settings";
   return path;
+}
+
+export function servicePath(id, child = "") {
+  const base = `/services/${encodeURIComponent(id)}`;
+  return child ? `${base}/${encodeURIComponent(child)}` : base;
+}
+
+export function breadcrumb(items) {
+  const parts = items.map((item, index) => {
+    const current = index === items.length - 1;
+    const text = esc(item.label);
+    return current || !item.path
+      ? `<span aria-current="page">${text}</span>`
+      : `<a href="#${esc(item.path)}">${text}</a>`;
+  });
+  return `<nav class="breadcrumb" aria-label="面包屑">${parts.join('<span class="crumb-sep">/</span>')}</nav>`;
+}
+
+export function serviceTabs(service, active = "") {
+  const tabs = [
+    { slug: "", label: "概览" },
+    { slug: "logs", label: "日志" },
+    { slug: "diagnostics", label: "诊断" },
+    { slug: "settings", label: "设置" },
+    ...(service.tools || []).map((tool) => ({ slug: tool.slug, label: tool.label })),
+  ];
+  const seen = new Set();
+  return `<nav class="section-tabs" aria-label="${esc(service.label)} 子页面">${tabs
+    .filter((tab) => {
+      const key = tab.slug;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((tab) => {
+      const href = `#${servicePath(service.id, tab.slug)}`;
+      const cls = tab.slug === active ? "active" : "";
+      return `<a class="${cls}" href="${href}">${esc(tab.label)}</a>`;
+    })
+    .join("")}</nav>`;
 }
 
 export async function api(path, options = {}) {
@@ -67,16 +107,15 @@ export async function api(path, options = {}) {
 }
 
 export function shell(main, path) {
-  const nav = [
-    ["/", "▦", "总览"],
-    ["/doctor", "✚", "诊断"],
-    ["/settings", "⚙", "设置"],
-    ["/about", "ⓘ", "关于"],
+  const navGroups = [
+    { label: "服务", items: [["/", "▦", "总览", "overview"]] },
+    { label: "配置", items: [["/diagnostics", "✚", "诊断", "inspect"], ["/settings", "⚙", "设置", "config"]] },
+    { label: "其他", items: [["/about", "ⓘ", "关于", "info"]] },
   ];
-  const links = nav.map(([href, icon, label]) => {
+  const links = navGroups.map((group) => `<div class="nav-label">${group.label}</div>${group.items.map(([href, icon, label, tone]) => {
     const cls = activeNav(path) === href ? "active" : "";
-    return `<a class="${cls}" href="#${href}"><span class="nav-icon">${icon}</span>${label}</a>`;
-  }).join("");
+    return `<a class="${cls}" data-tone="${tone}" href="#${href}"><span class="nav-icon">${icon}</span>${label}</a>`;
+  }).join("")}`).join("");
   app.innerHTML = `<aside class="sidebar">
     <div class="brand"><div class="brand-mark">W</div><div>
       <div class="brand-name">Web 服务启动器</div>
@@ -118,18 +157,31 @@ export function closeModal() {
 
 export async function openPicker(initial, includeFiles, onPick) {
   let current = initial || "";
+  let fallbackAvailable = Boolean(current);
   const render = async () => {
     let data;
     try { data = await api(`/api/fs?path=${encodeURIComponent(current)}&files=${includeFiles ? "1" : "0"}`); }
-    catch (error) { toast(error.message, "err"); return; }
+    catch (error) {
+      if (fallbackAvailable) {
+        fallbackAvailable = false;
+        current = "";
+        toast(`${error.message}；已从起始位置重新开始`, "warn");
+        return render();
+      }
+      toast(error.message, "err");
+      return;
+    }
+    fallbackAvailable = false;
     current = data.path;
     const items = (data.entries || []).map((entry) => `<div class="dir-item ${entry.dir ? "dir" : ""}" data-pick-path="${esc(entry.path)}" data-pick-dir="${entry.dir ? "1" : "0"}">
       <span>${entry.dir ? "▸" : "·"} ${esc(entry.name)}</span><span class="tiny muted">${entry.dir ? "目录" : "文件"}</span></div>`).join("");
-    openModal("选择路径", `<div class="row"><input id="picker-path" class="grow" value="${esc(current)}"><button class="btn small" data-pick-go="1">前往</button></div>
+    openModal("选择路径", `<div class="row"><input id="picker-path" class="grow" placeholder="输入路径，或从下方选择盘符/目录" value="${esc(current)}"><button class="btn small" data-pick-go="1">前往</button></div>
       <div class="dir-list">${items || `<div class="empty">没有可显示的目录</div>`}</div>
-      <div class="row"><button class="btn ghost" data-pick-parent="${esc(data.parent || "")}" ${data.parent ? "" : "disabled"}>上一级</button>
-      <button class="btn primary" data-pick-current="1">选择当前目录</button><button class="btn ghost" data-modal-close="1">取消</button></div>`, null);
+      <div class="row"><button class="btn ghost" data-pick-roots="1" ${data.path ? "" : "disabled"}>起始位置</button>
+      <button class="btn ghost" data-pick-parent="${esc(data.parent || "")}" ${data.parent ? "" : "disabled"}>上一级</button>
+      <button class="btn primary" data-pick-current="1" ${data.path ? "" : "disabled"}>选择当前目录</button><button class="btn ghost" data-modal-close="1">取消</button></div>`, null);
     modalRoot.querySelector("[data-pick-go]").onclick = () => { current = q("picker-path").value; render(); };
+    modalRoot.querySelector("[data-pick-roots]").onclick = () => { current = ""; render(); };
     modalRoot.querySelectorAll("[data-pick-path]").forEach((node) => node.onclick = () => {
       if (node.dataset.pickDir === "1") { current = node.dataset.pickPath; render(); }
       else if (includeFiles) { closeModal(); onPick(node.dataset.pickPath); }

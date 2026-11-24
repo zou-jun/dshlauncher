@@ -77,7 +77,7 @@ class ControlBackend:
                 "id": context.service_id,
                 "label": context.spec.label,
                 "description": context.spec.description,
-                "links": [{"label": label, "href": href} for label, href in context.spec.console_links],
+                "tools": [{"slug": slug, "label": label} for slug, label in context.spec.console_tools],
                 "running": False,
                 "error": f"{type(exc).__name__}: {exc}",
             }
@@ -86,7 +86,7 @@ class ControlBackend:
         data["description"] = context.spec.description
         data["open_on_start"] = context.spec.open_on_start
         data["supports_updates"] = context.spec.supports_updates
-        data["links"] = [{"label": label, "href": href} for label, href in context.spec.console_links]
+        data["tools"] = [{"slug": slug, "label": label} for slug, label in context.spec.console_tools]
         data["busy"] = self._busy(controller)
         data["status"] = "running" if status.running else "stopped"
         data["url"] = logs.redact(status.url or "") or None
@@ -116,8 +116,8 @@ class ControlBackend:
                     "description": spec.description if spec is not None else "服务配置不可用",
                     "open_on_start": spec.open_on_start if spec is not None else False,
                     "supports_updates": spec.supports_updates if spec is not None else False,
-                    "links": (
-                        [{"label": label, "href": href} for label, href in spec.console_links]
+                    "tools": (
+                        [{"slug": slug, "label": label} for slug, label in spec.console_tools]
                         if spec is not None
                         else []
                     ),
@@ -244,7 +244,7 @@ class ControlBackend:
 
     # ── 诊断 / 安装 / 目录 ────────────────────────────────────────────
     def doctor(self, service_ids: list[str] | None = None) -> dict[str, Any]:
-        wanted = registry.split(",".join(service_ids)) if service_ids else registry.ids()
+        wanted = registry.split(",".join(service_ids)) if service_ids is not None else registry.ids()
         services = []
         for service_id in wanted:
             try:

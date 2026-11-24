@@ -25,8 +25,8 @@ class ServiceSpec:
     supports_updates: bool = False
     open_on_start: bool = False
     description: str = ""
-    #: 控制台里该服务的自定义入口（例如 dsh 更新、Jupyter 配置）。
-    console_links: tuple[tuple[str, str], ...] = ()
+    #: 该服务的控制台子页（slug, label）；路径固定为 /services/<id>/<slug>。
+    console_tools: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

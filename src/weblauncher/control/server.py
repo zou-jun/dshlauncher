@@ -225,7 +225,7 @@ class _Handler(BaseHTTPRequestHandler):
         services = payload.get("services")
         if services is not None and not isinstance(services, list):
             raise ControlError("services 必须是字符串数组")
-        wanted = [str(item) for item in services] if services else None
+        wanted = [str(item) for item in services] if services is not None else None
         job = self.server.control.jobs.submit("诊断", lambda: self.server.control.backend.doctor(wanted))
         self._json(202, job.as_dict())
 

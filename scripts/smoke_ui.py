@@ -33,10 +33,20 @@ from weblauncher.tray import ipc  # noqa: E402
 
 CHECKS = (
     ("/#/", ("总览", "最近操作")),
-    ("/#/settings", ("控制台设置", "高级 TOML")),
-    ("/#/services/dsh", ("dsh", "服务诊断")),
-    ("/#/logs/dsh", ("日志尾部", "返回总览")),
-    ("/#/doctor", ("诊断", "启动器通用环境")),
+    ("/#/diagnostics", ("启动器诊断", "通用")),
+    ("/#/settings", ("启动器设置", "高级 TOML")),
+    ("/#/settings/advanced", ("高级 TOML", "保存 TOML")),
+    ("/#/services/dsh", ("服务状态", "最近日志")),
+    ("/#/services/dsh/logs", ("日志尾部", "概览")),
+    ("/#/services/dsh/diagnostics", ("诊断", "依赖")),
+    ("/#/services/dsh/settings", ("dsh web 设置", "dsh.port")),
+    ("/#/services/jupyter", ("Jupyter Lab", "服务状态")),
+    ("/#/services/jupyter/kernels", ("Jupyter 内核", "已安装内核")),
+    ("/#/services/jupyter/workdirs", ("Jupyter 工作目录", "最近目录")),
+    ("/#/logs/dsh", ("日志尾部", "概览")),
+    ("/#/settings/dsh", ("dsh web 设置", "dsh.port")),
+    ("/#/doctor", ("启动器诊断", "通用")),
+    ("/#/about", ("关于", "版本")),
 )
 MODULES = (
     "/core.js",
@@ -46,9 +56,10 @@ MODULES = (
     "/pages/logs.js",
     "/pages/status.js",
     "/pages/settings.js",
+    "/pages/service_settings.js",
     "/pages/updates.js",
     "/pages/jupyter.js",
-    "/pages/doctor.js",
+    "/pages/diagnostics.js",
     "/pages/about.js",
 )
 
@@ -316,6 +327,21 @@ def main() -> int:
                     page.call("Page.navigate", {"url": console.url(target)})
                     _wait_text(page, markers, args.timeout)
                     print(f"PASS {target} via {browser.family}")
+                if sys.platform == "win32":
+                    page.call("Page.navigate", {"url": console.url("/#/services/jupyter/workdirs")})
+                    _wait_text(page, ("Jupyter 工作目录",), args.timeout)
+                    page.evaluate("document.querySelector('[data-workdir-picker]')?.click()")
+                    _wait_text(page, ("起始位置",), args.timeout)
+                    picker_path = page.evaluate("document.querySelector('#picker-path')?.value")
+                    drives = page.evaluate(
+                        "[...document.querySelectorAll('[data-pick-path]')]"
+                        ".map((node) => node.dataset.pickPath)"
+                    )
+                    if picker_path != "" or not drives:
+                        raise SystemExit(
+                            f"工作目录选择器没有从盘符开始：path={picker_path!r} drives={drives!r}"
+                        )
+                    print("PASS 工作目录选择器从盘符开始")
                 modules = page.evaluate(
                     "Promise.all("
                     f"{json.dumps(list(MODULES))}.map(async (path) => [path, (await fetch(path)).status]))"

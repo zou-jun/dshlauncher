@@ -26,7 +26,7 @@ class DshAdapter:
         stop_untracked=True,
         supports_updates=True,
         open_on_start=True,
-        console_links=(("dsh 更新", "/#/updates"), ("dsh 设置", "/#/settings/dsh")),
+        console_tools=(("updates", "更新"),),
     )
 
     def __init__(self, settings: Settings, paths_: Paths | None = None) -> None:

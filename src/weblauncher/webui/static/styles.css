@@ -45,6 +45,11 @@ code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospac
 .brand-name { font-weight: 700; letter-spacing: .01em; }
 .brand-sub { color: var(--muted); font-size: 11px; margin-top: 1px; }
 .nav { display: flex; flex-direction: column; gap: 4px; }
+.nav-label {
+  color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; padding: 12px 11px 2px;
+}
+.nav-label:first-child { padding-top: 0; }
 .nav a {
   display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 9px;
   color: var(--muted); font-weight: 550;
@@ -52,6 +57,10 @@ code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospac
 .nav a:hover { color: var(--fg); background: var(--panel); }
 .nav a.active { color: var(--fg); background: #1b2635; box-shadow: inset 2px 0 0 var(--accent); }
 .nav-icon { width: 18px; text-align: center; opacity: .9; }
+.nav a[data-tone="overview"] .nav-icon { color: var(--accent); }
+.nav a[data-tone="inspect"] .nav-icon { color: var(--warn); }
+.nav a[data-tone="config"] .nav-icon { color: var(--ok); }
+.nav a[data-tone="info"] .nav-icon { color: var(--muted); }
 .sidebar-foot { margin-top: auto; color: var(--muted); font-size: 11px; padding: 0 10px; display: grid; gap: 7px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
 .dot.ok { background: var(--ok); box-shadow: 0 0 0 4px rgba(88, 210, 154, .08); }
@@ -93,10 +102,6 @@ h3 { margin: 0 0 8px; font-size: 14px; }
 .meta-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .meta-value { font-size: 13px; overflow-wrap: anywhere; }
 .card-actions { display: flex; gap: 7px; flex-wrap: wrap; margin-top: auto; }
-.service-links {
-  display: flex; gap: 7px; flex-wrap: wrap; align-items: center;
-  padding-top: 12px; border-top: 1px solid var(--line);
-}
 .log-tools { margin: 4px 0 12px; }
 .log-tools .field { min-width: 130px; }
 .pill {
@@ -159,6 +164,7 @@ textarea { min-height: 140px; resize: vertical; line-height: 1.5; }
 .toast { border: 1px solid var(--line); background: #1a222d; color: var(--fg); border-radius: 10px; padding: 11px 14px; box-shadow: var(--shadow); font-size: 13px; animation: in .15s ease-out; }
 .toast.err { border-color: #5c2a2a; color: #ffc1c1; }
 .toast.ok { border-color: #24543c; color: #b9f3d6; }
+.toast.warn { border-color: #5a4722; color: #f4d99c; }
 @keyframes in { from { opacity: 0; transform: translateY(5px); } }
 
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .62); display: grid; place-items: center; padding: 20px; z-index: 40; }
@@ -188,6 +194,7 @@ ol.steps li { display: flex; gap: 8px; align-items: baseline; }
   .shell { grid-template-columns: 1fr; }
   .sidebar { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 13px; }
   .nav { flex-direction: row; overflow-x: auto; gap: 2px; width: 100%; }
+  .nav-label { display: none; }
   .nav a { white-space: nowrap; padding: 7px 9px; }
   .brand-sub, .sidebar-foot { display: none; }
   .main { padding-top: 20px; }
@@ -201,3 +208,24 @@ ol.steps li { display: flex; gap: 8px; align-items: baseline; }
   .service-meta { grid-template-columns: 1fr; }
   .kv { grid-template-columns: 1fr; gap: 2px; }
 }
+
+.breadcrumb {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 0 0 14px; color: var(--muted); font-size: 12px;
+}
+.breadcrumb a { color: var(--muted); text-decoration: none; }
+.breadcrumb a:hover { color: var(--accent); }
+.breadcrumb .crumb-sep { color: var(--line); }
+.breadcrumb [aria-current="page"] { color: var(--fg); }
+
+.section-tabs {
+  display: flex; gap: 4px; flex-wrap: wrap; margin: 0 0 16px;
+  padding: 4px; border: 1px solid var(--line); border-radius: 10px;
+  width: fit-content; max-width: 100%;
+}
+.section-tabs a {
+  padding: 7px 12px; border-radius: 7px; color: var(--muted);
+  text-decoration: none; font-size: 13px;
+}
+.section-tabs a:hover { color: var(--fg); background: var(--surface); }
+.section-tabs a.active { color: var(--fg); background: var(--surface); box-shadow: inset 0 -2px 0 var(--accent); }

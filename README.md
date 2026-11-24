@@ -3,10 +3,10 @@
 一个启动器托管多个本地服务：**dsh web** 与 **Jupyter Lab**。服务仍是独立的分离进程，所有启动器交互统一进本机 Web 控制台。
 
 - **Web 控制台**：服务启停/打开、Web 日志页、配置、诊断、Jupyter 内核与工作目录、dsh 更新、桌面入口、退出全部在 `127.0.0.1` 随机端口
-- 左侧栏只放启动器通用功能（总览 / 诊断 / 设置 / 关于）；dsh 更新与设置、Jupyter 配置与设置在总览各自的卡片里进入
+- 左侧栏只放启动器通用功能（总览 / 诊断 / 设置 / 关于）；进入服务后，日志、诊断、设置和 dsh 更新 / Jupyter 工具都是该服务的子页面
 - 双击 exe / 桌面快捷方式打开控制台；托盘图标默认菜单项也是「打开控制台」，双击直接弹窗；启动 Agent 不自动启动任何服务
 - 服务以分离进程运行：关掉终端、关掉窗口都不影响它；控制台里可显式停止全部
-- 默认每个服务一个无扩展 `--app` 窗口；`ui.single_window = true` 时控制台和所有服务合并成一个普通浏览器窗口、各自一个标签页
+- 默认每个服务一个无扩展 `--app` 窗口；`ui.single_window = true` 时控制台和所有服务合并成一个普通浏览器窗口、各自一个标签页，默认使用独立 `tabbed-browser`，也可切换为日常 Chrome
 - Jupyter 的工作目录、默认内核按目录记忆；内核可直接注册任意 uv 项目 venv
 - 新服务 = `services/<id>/` 适配器 + 注册表一行，控制台/CLI 自动获得入口
 - Windows 完整支持；Linux 完整支持（X11 / XWayland，见「平台差异」）；macOS 尽力而为
@@ -79,31 +79,57 @@ uv run python -m weblauncher open dsh
 
 通用参数：`--host --port --browser --ozone --profile-dir --no-dedupe --start-timeout`。
 dsh 额外接受 `--cwd --node --dsh-bin`；Jupyter 额外接受 `--root --kernel --jupyter-bin --base-url`。
-`dsh updates` 额外接受 `--json` / `--panel` / `--profile` / `--timeout`；`--panel` 现在打开控制台 `/updates`。
+`dsh updates` 额外接受 `--json` / `--panel` / `--profile` / `--timeout`；`--panel` 现在打开控制台 `/services/dsh/updates`。
 
 ### Web 控制台
 
+控制台采用“服务优先”的层级：左侧栏按「服务 / 配置 / 其他」分组，并给分组图标配色；服务专属的日志、诊断、设置和工具都在该服务路径下。
+
+```
+#/
+├─ #/diagnostics                  启动器诊断
+├─ #/settings                     启动器设置
+│  └─ #/settings/advanced         高级 TOML
+├─ #/services/<id>                服务详情（状态、最近日志、快捷操作）
+│  ├─ #/services/<id>/logs
+│  ├─ #/services/<id>/diagnostics
+│  ├─ #/services/<id>/settings
+│  ├─ #/services/dsh/updates      dsh 更新（仅 dsh）
+│  └─ #/services/jupyter/kernels  Jupyter 内核 / workdirs 工作目录
+└─ #/about
+```
+
 | 页面 | 作用 |
 |---|---|
-| 总览 | 所有服务状态、PID/端口、启动/停止/重启/打开、启动全部/停止全部、最近任务；每张服务卡片带该服务的自定义入口 |
-| 服务详情 | 实时状态、脱敏 URL、工作目录、实时日志、服务诊断、打开数据目录、强制停止 |
-| Web 日志 | 在页面里查看日志尾部，可切换行数、自动刷新；不再调用外部编辑器 |
-| dsh 更新 | 从 dsh 卡片进入：dsh 与插件版本、可更新项、升级进度与实时日志 |
-| Jupyter 配置 | 从 Jupyter 卡片进入：内核注册/查看/设为默认/改名/删除；工作目录与按目录内核记忆 |
-| 控制台设置 | `[launcher] [ui]` 通用表单 + 高级 TOML 编辑器（可编辑全部段） |
-| 服务设置 | 从服务卡片进入：`[dsh]` / `[jupyter]` 各自表单，不混入控制台设置 |
-| 诊断 | 上部为启动器通用环境，下部按服务分卡片显示依赖、端口、状态文件与日志；可复制 JSON |
+| 总览 | 所有服务状态、PID/端口、启动/停止/重启/打开、启动全部/停止全部、最近任务；服务卡片只负责“进入服务” |
+| 服务详情 | 实时状态、脱敏 URL、工作目录、最近日志、打开服务诊断、打开数据目录、强制停止、服务标签页 |
+| 服务日志 | `#/services/<id>/logs`：日志尾部、行数切换、自动刷新；不再调用外部编辑器 |
+| 服务诊断 | `#/services/<id>/diagnostics`：该服务的依赖、端口、状态文件与日志；可复制 JSON |
+| 服务设置 | `#/services/<id>/settings`：dsh / Jupyter 各自的配置表单，不混入启动器设置 |
+| dsh 更新 | `#/services/dsh/updates`：dsh 与插件版本、可更新项、升级进度与实时日志 |
+| Jupyter 工具 | `#/services/jupyter/kernels` 内核注册/查看/设为默认/改名/删除；`workdirs` 工作目录与按目录内核记忆 |
+| 启动器设置 | `#/settings`：`[launcher] [ui]` 通用表单；高级 TOML 编辑器在 `#/settings/advanced` |
+| 启动器诊断 | `#/diagnostics`：启动器通用环境；各服务诊断在自己的服务路径下 |
 | 关于 | 版本/路径、安装/删除桌面入口、退出控制台（可同时停服务） |
 
+旧地址（`#/logs/<id>`、`#/settings/<id>`、`#/jupyter`、`#/updates`、`#/doctor`）会保留 query 并重定向到上述路径。
+
 托盘菜单只保留打开控制台和退出；控制台使用独立 Chromium profile，关闭控制台窗口不会停止服务。
-开启单窗口模式后，控制台与所有服务改用共用的 `tabbed-browser/` 配置，以普通窗口的标签页打开；关掉窗口会结束这个共用浏览器进程，但服务本身继续运行。
+开启单窗口模式后，控制台与所有服务改用共用的 `tabbed-browser/` 配置，以普通窗口的标签页打开；也可用 `single_window_profile = "daily"` 改为使用日常 Chrome 的默认配置。关掉窗口会结束这个共用浏览器进程，但服务本身继续运行。
+
+```bash
+weblauncher config set ui.single_window true
+weblauncher config set ui.single_window_profile daily   # 或 tabbed
+```
+
+切换后重新打开控制台；`daily` 会共享日常 Chrome 的书签、登录状态和扩展。
 
 ## 检查与升级更新
 
 ```bash
 weblauncher updates                 # 文本报告；有更新退出码 1
 weblauncher updates --json          # 脚本消费
-weblauncher updates --panel         # 打开控制台 /updates
+weblauncher updates --panel         # 打开控制台 /services/dsh/updates
 weblauncher updates --profile dsh-tui --timeout 60
 ```
 
@@ -118,7 +144,7 @@ weblauncher updates --profile dsh-tui --timeout 60
 - **前置条件**：文本检查需要 npm 或 pnpm；dsh 升级还需要能识别 dsh 所属的全局包管理器。
   用 `--dsh-bin` / `WEBLAUNCHER_DSH_BIN` 显式指定 dsh 路径时，不自动升级 dsh，控制台会提示手动处理。
 - **控制台**：只监听 `127.0.0.1` 的随机端口；一次性 bootstrap ticket 设置 HttpOnly 会话 Cookie，写操作还校验 CSRF、Host 与 Origin。控制台使用独立的 `control-browser/` Chromium 配置。
-  更新任务随 Agent 存活；`updates --panel` 会打开控制台 `/updates`。
+  更新任务随 Agent 存活；`updates --panel` 会打开控制台 `/services/dsh/updates`。
 - **非 registry 依赖**：`file:` / `link:` / `git+` / GitHub 简写 / tarball / `npm:` 别名不猜测更新，
   在控制台里标记为跳过。
 - **无法比较或安装失败**：报告会保留具体版本和命令输出；dsh 升级失败会跳过后续插件，
@@ -145,8 +171,10 @@ weblauncher updates --profile dsh-tui --timeout 60
 | `launcher.log` | 启动器动作审计；超过 1 MB 轮转为 `.1` |
 | `upgrades.log` | dsh 升级任务完整日志 |
 | `control-browser/` | Web 控制台的独立 Chromium 配置 |
-| `tabbed-browser/` | 单窗口模式的共用 Chromium 配置；启用 `ui.single_window` 时使用 |
+| `tabbed-browser/` | 单窗口模式的独立 Chromium 配置；`single_window = true` 且 `single_window_profile = "tabbed"` 时使用 |
 | `tray.lock` / `tray.json` | Agent 单实例锁与 loopback IPC 端口/随机 token |
+
+`single_window_profile = "daily"` 时不创建专用 profile，直接使用系统 Chrome 的默认配置；此时会看到日常书签、登录状态和扩展。
 
 旧版单服务布局（根目录 `state.json` / `dsh-web.log` / `browser/`）会在首次运行时自动搬进 `services/dsh/`；旧品牌数据目录 `.dshlauncher/` 也会在首次启动时整体改名为 `.weblauncher/`。
 
@@ -165,6 +193,7 @@ browser = "chrome"          # 或可执行文件路径
 ozone = "auto"
 dedupe = true
 single_window = false       # true: 控制台与服务共用一个窗口、普通标签页
+# single_window_profile = "tabbed"  # tabbed: 独立 tabbed-browser；daily: 日常 Chrome
 
 [ui.window]
 width_ratio = 0.84
@@ -224,6 +253,7 @@ Jupyter 默认 `8888`，冲突时按 `8889 → 8890 → 18888…` 自动回退�
 | `WEBLAUNCHER_DSH_PROFILE_DIR` | dsh 专用浏览器配置目录（零扩展窗口的数据） | `<数据目录>/services/dsh/browser` |
 | `WEBLAUNCHER_NO_DEDUPE` | 设为任意非空值即不复用已有窗口，每次都新开 | 未设置（窗口存在时置前） |
 | `WEBLAUNCHER_SINGLE_WINDOW` | 设为 `1` / `true` 时控制台与服务共用一个浏览器窗口、以标签页打开；服务页不再是 `--app` 窗口 | 未设置（每个服务独立窗口） |
+| `WEBLAUNCHER_SINGLE_WINDOW_PROFILE` | 单窗口模式配置：`tabbed` 使用独立 tabbed-browser；`daily` 使用日常 Chrome 默认配置 | `tabbed` |
 | `WEBLAUNCHER_DSH_START_TIMEOUT` | 等待 dsh 就绪的秒数 | `120` |
 | `WEBLAUNCHER_JUPYTER_HOST` | Jupyter 监听地址 | `127.0.0.1` |
 | `WEBLAUNCHER_JUPYTER_PORT` | Jupyter 端口 | `8888`；显式值不自动替换，省略时冲突自动回退 |
@@ -314,7 +344,7 @@ src/weblauncher/
   ports.py process.py supervisor.py 共享：端口、进程树、生命周期
   discovery.py browser.py          浏览器窗口与一次性 ticket
   control/                         Web 控制台后端：认证、API、任务、静态资源
-  webui/static/                    无构建 SPA（core + pages ES modules）
+  webui/static/                    无构建 SPA（core + app 路由 + pages；服务子树页面）
   controller.py                   服务动作控制器与控制器的线程安全快照
   services/base.py                 服务适配器契约
   services/common_settings.py      服务共用配置解析

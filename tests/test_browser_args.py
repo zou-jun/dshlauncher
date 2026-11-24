@@ -185,3 +185,76 @@ def test_single_window_existing_profile_appends_tab(monkeypatch: pytest.MonkeyPa
     assert not any(arg.startswith("--app=") for arg in args)
     assert "--new-window" not in args
     assert args[-1] == "http://127.0.0.1:2/"
+
+
+def test_single_window_daily_profile_omits_user_data_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[list[str]] = []
+
+    class Backend:
+        def detach_kwargs(self, *, breakaway: bool = True) -> dict[str, int]:
+            return {"creationflags": 0}
+
+        def process_names(self, browser: str) -> set[str]:
+            return {"chrome.exe"}
+
+        def supports_window_control(self, ozone: str | None = None) -> bool:
+            return True
+
+        def work_area(self) -> None:
+            return None
+
+    monkeypatch.setattr(browser.platform, "load", lambda: Backend())
+    monkeypatch.setattr(
+        browser.discovery,
+        "browser_exe",
+        lambda value: discovery.Browser("chrome", Path("chrome.exe")),
+    )
+    monkeypatch.setattr(browser, "_default_profile_pids", lambda *args: set())
+    monkeypatch.setattr(browser.paths, "child_env", lambda: {})
+    monkeypatch.setattr(browser.subprocess, "Popen", lambda args, **kwargs: calls.append(args))
+
+    settings = Settings(profile_dir=tmp_path / "browser", single_window=True, daily_profile=True)
+    assert browser.launch(settings, "http://127.0.0.1:3/") == "new"
+    args = calls[0]
+    assert not any(arg.startswith("--user-data-dir=") for arg in args)
+    assert "--disable-sync" not in args
+    assert "--new-window" in args
+    assert args[-1] == "http://127.0.0.1:3/"
+
+
+def test_single_window_daily_profile_reuses_open_chrome(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[list[str]] = []
+
+    class Backend:
+        def detach_kwargs(self, *, breakaway: bool = True) -> dict[str, int]:
+            return {"creationflags": 0}
+
+        def process_names(self, browser: str) -> set[str]:
+            return {"chrome.exe"}
+
+        def supports_window_control(self, ozone: str | None = None) -> bool:
+            return True
+
+        def work_area(self) -> None:
+            return None
+
+    monkeypatch.setattr(browser.platform, "load", lambda: Backend())
+    monkeypatch.setattr(
+        browser.discovery,
+        "browser_exe",
+        lambda value: discovery.Browser("chrome", Path("chrome.exe")),
+    )
+    monkeypatch.setattr(browser, "_default_profile_pids", lambda *args: {1})
+    monkeypatch.setattr(browser.paths, "child_env", lambda: {})
+    monkeypatch.setattr(browser.subprocess, "Popen", lambda args, **kwargs: calls.append(args))
+
+    settings = Settings(profile_dir=tmp_path / "browser", single_window=True, daily_profile=True)
+    assert browser.launch(settings, "http://127.0.0.1:4/") == "tab"
+    args = calls[0]
+    assert not any(arg.startswith("--user-data-dir=") for arg in args)
+    assert "--new-window" not in args
+    assert args[-1] == "http://127.0.0.1:4/"

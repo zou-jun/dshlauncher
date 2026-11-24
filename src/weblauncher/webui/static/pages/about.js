@@ -1,10 +1,10 @@
-import { api, state, esc, shell, pageHead } from "../core.js";
+import { api, state, esc, shell, pageHead, breadcrumb } from "../core.js";
 
 export async function loadAbout() {
   const data = await api("/api/about");
   if (state.route !== "/about") return;
   state.about = data;
-  shell(`${pageHead("关于", "启动器版本、运行时路径和桌面入口。", "")}
+  shell(`${breadcrumb([{ label: "总览", path: "/" }, { label: "关于" }])}${pageHead("关于", "启动器版本、运行时路径和桌面入口。", "")}
     <div class="card"><div class="kv">
       <div class="k">版本</div><div class="v">${esc(data.version)}</div>
       <div class="k">平台</div><div class="v">${esc(data.platform)} · ${data.frozen ? "打包版" : "源码运行"}</div>

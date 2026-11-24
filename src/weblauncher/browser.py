@@ -32,6 +32,19 @@ def _profile_pids(profile_dir: Path, names: set[str]) -> set[int]:
     return pids
 
 
+def _default_profile_pids(names: set[str]) -> set[int]:
+    """命令行没有专用 user-data-dir 的浏览器进程，即日常 Chrome。"""
+    wanted = {name.lower() for name in names}
+    pids: set[int] = set()
+    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        name = (proc.info.get("name") or "").lower()
+        if name not in wanted:
+            continue
+        if "--user-data-dir" not in " ".join(proc.info.get("cmdline") or []):
+            pids.add(proc.pid)
+    return pids
+
+
 def _wait_window(
     profile_dir: Path,
     names: set[str],
@@ -73,15 +86,14 @@ def ozone_args(settings: Any) -> list[str]:
 
 
 def _base_args(settings: Any, browser: discovery.Browser) -> list[str]:
-    return [
-        str(browser.path),
-        f"--user-data-dir={settings.profile_dir}",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-sync",
-        "--no-service-autorun",
-        "--disable-features=Translate",
-    ]
+    args = [str(browser.path)]
+    daily = bool(getattr(settings, "daily_profile", False))
+    if not daily:
+        args.append(f"--user-data-dir={settings.profile_dir}")
+    args += ["--no-first-run", "--no-default-browser-check"]
+    if not daily:
+        args += ["--disable-sync", "--no-service-autorun", "--disable-features=Translate"]
+    return args
 
 
 def build_args(
@@ -156,9 +168,12 @@ def _launch_tabbed(
     window_control: bool,
     target: Rect | None,
 ) -> str:
-    profile.mkdir(parents=True, exist_ok=True)
-    existing = _profile_pids(profile, names)
-    new_window = not existing
+    daily = bool(getattr(settings, "daily_profile", False))
+    if daily:
+        new_window = not _default_profile_pids(names)
+    else:
+        profile.mkdir(parents=True, exist_ok=True)
+        new_window = not _profile_pids(profile, names)
     args = build_tab_args(
         settings,
         browser,
@@ -168,7 +183,7 @@ def _launch_tabbed(
         new_window=new_window,
     )
     _popen(args, backend=backend)
-    if new_window and window_control:
+    if not daily and new_window and window_control:
         hwnd = _wait_window(profile, names, backend=backend)
         if hwnd is not None:
             _settle(hwnd, target, backend=backend)

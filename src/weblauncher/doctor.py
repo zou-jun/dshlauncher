@@ -83,6 +83,7 @@ def general(runtime: Runtime) -> list[tuple[str, str]]:
             f"{runtime.paths.memory}  ({'存在' if runtime.paths.memory.is_file() else '不存在'})",
         ),
         ("浏览器", _browser_text(runtime)),
+        ("浏览器配置", _browser_profile_text(runtime)),
     ]
 
 
@@ -134,6 +135,15 @@ def report(
         for label, value in service(runtime, service_id):
             rows.append((f"{service_id} · {label}", value))
     return rows
+
+
+def _browser_profile_text(runtime: Runtime) -> str:
+    ui = runtime.config.ui
+    if not ui.single_window:
+        return "独立配置：控制台 control-browser，服务各自 profile"
+    if ui.daily_profile:
+        return "日常 Chrome：系统默认配置（不传 --user-data-dir）"
+    return f"独立 tabbed-browser：{runtime.paths.tabbed_profile}"
 
 
 def _browser_text(runtime: Runtime) -> str:

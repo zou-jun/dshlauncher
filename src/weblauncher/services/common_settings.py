@@ -26,6 +26,7 @@ class CommonSettings:
     start_timeout: float = config_mod.DEFAULT_START_TIMEOUT
     dedupe: bool = True
     single_window: bool = False
+    daily_profile: bool = False
 
     def window_kwargs(self) -> dict[str, Any]:
         return {
@@ -52,6 +53,7 @@ class ResolvedCommon:
     start_timeout: float
     dedupe: bool
     single_window: bool
+    daily_profile: bool
 
     def as_kwargs(self) -> dict[str, Any]:
         return {item.name: getattr(self, item.name) for item in fields(type(self))}
@@ -117,6 +119,7 @@ def resolve_common(
         start_timeout=resolved_timeout,
         dedupe=cfg.ui.dedupe if dedupe is None else dedupe,
         single_window=cfg.ui.single_window,
+        daily_profile=cfg.ui.daily_profile,
     )
 
 

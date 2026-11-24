@@ -18,6 +18,7 @@ from . import geometry
 ENV_PREFIX = "WEBLAUNCHER_"
 DEFAULT_START_TIMEOUT = 120.0
 OZONE_MODES = ("auto", "x11", "wayland")
+SINGLE_WINDOW_PROFILES = ("tabbed", "daily")
 
 
 def env(name: str, prefix: str = ENV_PREFIX) -> str | None:
@@ -56,7 +57,13 @@ class UiSettings:
     dedupe: bool = True
     #: 控制台与所有服务共用同一个浏览器窗口，以普通标签页而不是 --app 窗口打开。
     single_window: bool = False
+    #: 单窗口模式使用的浏览器配置：tabbed = 独立 tabbed-browser，daily = 日常 Chrome。
+    single_window_profile: str = "tabbed"
     window: WindowSettings = WindowSettings()
+
+    @property
+    def daily_profile(self) -> bool:
+        return self.single_window and self.single_window_profile == "daily"
 
 
 @dataclass(frozen=True)
@@ -110,6 +117,16 @@ def load(path: Path | None = None) -> Config:
     ozone = str(env("OZONE") or _legacy(raw, ui_raw, "ozone", "auto")).strip().lower()
     if ozone not in OZONE_MODES:
         raise ValueError(f"ozone 只能是 {' / '.join(OZONE_MODES)}，收到 {ozone!r}")
+    single_window_profile = (
+        str(env("SINGLE_WINDOW_PROFILE") or _legacy(raw, ui_raw, "single_window_profile", "tabbed"))
+        .strip()
+        .lower()
+    )
+    if single_window_profile not in SINGLE_WINDOW_PROFILES:
+        raise ValueError(
+            "single_window_profile 只能是 "
+            f"{' / '.join(SINGLE_WINDOW_PROFILES)}，收到 {single_window_profile!r}"
+        )
 
     window = WindowSettings(
         width_ratio=float(
@@ -144,6 +161,7 @@ def load(path: Path | None = None) -> Config:
                 env("SINGLE_WINDOW") or _legacy(raw, ui_raw, "single_window", False),
                 False,
             ),
+            single_window_profile=single_window_profile,
             window=window,
         ),
         raw=raw,

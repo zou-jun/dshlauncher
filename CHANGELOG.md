@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.0
+
+- 控制台改为服务优先的信息架构：左侧栏按「服务 / 配置 / 其他」分组，诊断/设置归入配置区并用图标颜色区分；服务日志、诊断、设置和专属工具都在 `#/services/<id>/` 子树。
+- 服务详情成为子树根，统一提供日志、诊断、设置和服务工具标签；Jupyter 内核/工作目录、dsh 更新不再挂在总览卡片。
+- 设置拆成启动器设置（`#/settings`、`#/settings/advanced`）和服务设置（`#/services/<id>/settings`）；诊断拆成启动器诊断（`#/diagnostics`）和服务诊断（`#/services/<id>/diagnostics`）。
+- `ServiceSpec.console_tools` 改为相对 slug；后端不再保存 `/api/services/...` 绝对链接，前端用 `servicePath()` 生成路径和面包屑。
+- 单窗口模式新增 `ui.single_window_profile`：`tabbed` 使用独立 `tabbed-browser`，`daily` 直接使用日常 Chrome 默认配置（共享书签、登录和扩展）；`doctor` 显示当前浏览器配置。
+- 旧地址 `#/logs/<id>`、`#/settings/<id>`、`#/jupyter`、`#/updates`、`#/doctor` 保留 query 并重定向；`smoke_ui.py` 覆盖新路径和旧地址重定向。
+- 路径选择器支持「起始位置」回到盘符/主目录；Jupyter 工作目录浏览从盘符开始，初始路径失效时自动回退到起始位置。
+
 ## 0.9.0
 
 - 控制台 HTTP 改为 `control/routes.py` 表驱动；GET/POST/PUT/PATCH/DELETE 统一按方法 + 路径模式分发。

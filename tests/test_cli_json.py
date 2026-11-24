@@ -80,5 +80,5 @@ def test_updates_panel_opens_control_route(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(tray, "send_ui", fake_send)
     monkeypatch.setattr(tray, "open_console_url", lambda runtime, url: calls.setdefault("url", url) or "new")
     assert cli.main(["updates", "--panel", "--profile", "dsh-tui", "--timeout", "5"]) == 0
-    assert calls["target"] == "/#/updates?profile=dsh-tui&timeout=5.0"
+    assert calls["target"] == "/#/services/dsh/updates?profile=dsh-tui&timeout=5.0"
     assert calls["url"].endswith("/boot/ticket")

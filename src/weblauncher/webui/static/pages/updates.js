@@ -1,32 +1,42 @@
-import { api, state, esc, toast, shell, pageHead, errorCard, waitForJob } from "../core.js";
+import { api, state, esc, toast, shell, pageHead, errorCard, waitForJob, breadcrumb, serviceTabs, servicePath } from "../core.js";
 
 export async function loadUpdates(refresh = false) {
+  const target = servicePath("dsh", "updates");
   const profile = sessionStorage.getItem("updates.profile") || "web";
   const timeout = sessionStorage.getItem("updates.timeout") || "30";
-  shell(`${pageHead("dsh 更新", "正在检查 dsh 与插件版本…", "")}
-    <div class="card"><div class="empty">检查中，请稍候…</div></div>`, "/updates");
+  const service = await api("/api/services/dsh");
+  if (state.route !== target) return;
+  state.service = service;
+  const crumbs = breadcrumb([
+    { label: "总览", path: "/" },
+    { label: service.label, path: servicePath("dsh") },
+    { label: "更新" },
+  ]);
+  shell(`${crumbs}${pageHead("dsh 更新", "正在检查 dsh 与插件版本…", "")}${serviceTabs(service, "updates")}
+    <div class="card"><div class="empty">检查中，请稍候…</div></div>`, target);
   try {
     const submitted = await api("/api/updates", {
       method: "POST",
       body: { profile, timeout: Number(timeout), refresh },
     });
     const checked = await waitForJob(submitted.id);
-    if (state.route !== "/updates") return;
+    if (state.route !== target) return;
     if (checked.status === "failed") throw new Error(checked.error || "检查更新失败");
     state.updates = checked.result;
     let job = { status: "idle" };
     try { job = await api("/api/upgrade-job"); } catch (error) {}
     state.upgradeJob = job;
-    renderUpdates(profile, timeout);
+    renderUpdates(service, profile, timeout);
   } catch (error) {
-    if (state.route !== "/updates") return;
+    if (state.route !== target) return;
     toast(error.message, "err");
-    shell(`${pageHead("dsh 更新", "检查更新失败。", `<button class="btn ghost" data-updates-refresh="1">重新检查</button>`)}
-      ${errorCard(error)}`, "/updates");
+    shell(`${crumbs}${pageHead("dsh 更新", "检查更新失败。", `<button class="btn ghost" data-updates-refresh="1">重新检查</button>`)}
+      ${serviceTabs(service, "updates")}
+      ${errorCard(error)}`, target);
   }
 }
 
-function renderUpdates(profile, timeout) {
+function renderUpdates(service, profile, timeout) {
   const report = state.updates;
   if (!report) return;
   const dsh = report.dsh || {};
@@ -55,10 +65,16 @@ function renderUpdates(profile, timeout) {
       <ol class="steps">${(job.steps || []).map((step) => `<li><span class="sdot ${esc(step.status)}"></span><span>${esc(step.label)}${step.detail ? ` — ${esc(step.detail)}` : ""}</span></li>`).join("")}</ol>
       <pre class="logbox" style="margin-top:10px">${esc((job.log || []).join("\n") || "等待输出…")}</pre>
     </div>` : "";
-  shell(`${pageHead("dsh 更新", `检查于 ${esc(report.checked_at || "—")} · ${report.update_count || 0} 项可更新`,
-    `<a class="btn ghost" href="#/">返回总览</a>
-     <button class="btn ghost" data-updates-refresh="1">重新检查</button>
+  const target = servicePath("dsh", "updates");
+  const crumbs = breadcrumb([
+    { label: "总览", path: "/" },
+    { label: service.label, path: servicePath("dsh") },
+    { label: "更新" },
+  ]);
+  shell(`${crumbs}${pageHead("dsh 更新", `检查于 ${esc(report.checked_at || "—")} · ${report.update_count || 0} 项可更新`,
+    `<button class="btn ghost" data-updates-refresh="1">重新检查</button>
      <button class="btn primary" data-upgrade-all="1" ${allTargets.length ? "" : "disabled"}>全部升级 (${allTargets.length})</button>`)}
+    ${serviceTabs(service, "updates")}
     <div class="card"><div class="form-row">
       <label class="field"><span>dsh profile</span><input id="updates-profile" value="${esc(profile)}"></label>
       <label class="field"><span>单次查询超时（秒）</span><input id="updates-timeout" type="number" min="5" max="300" value="${esc(timeout)}"></label>
@@ -72,7 +88,7 @@ function renderUpdates(profile, timeout) {
       <span class="small muted">${plugins.length} 个 · ${plugins.filter((p) => p.update_available).length} 个可更新</span></div>
       <div class="table-wrap"><table><thead><tr><th>名称</th><th>当前</th><th>最新</th><th>说明</th><th></th></tr></thead><tbody>${pluginRows || `<tr><td colspan="5" class="muted">没有插件记录</td></tr>`}</tbody></table></div>
     </div>${(report.errors || []).length ? `<div class="card notice" style="margin-top:16px"><h2>检查问题</h2>${report.errors.map((error) => `<div class="small">${esc(error)}</div>`).join("")}</div>` : ""}
-    ${jobHtml}`, "/updates");
+    ${jobHtml}`, target);
 }
 
 export async function startUpgrade(targets) {
@@ -86,13 +102,16 @@ export async function startUpgrade(targets) {
 }
 
 async function pollUpgrade() {
+  const target = servicePath("dsh", "updates");
   for (let i = 0; i < 300; i += 1) {
     const job = await api("/api/upgrade-job");
     state.upgradeJob = job;
-    if (state.route === "/updates" && state.updates) renderUpdates(sessionStorage.getItem("updates.profile") || "web", sessionStorage.getItem("updates.timeout") || "30");
+    if (state.route === target && state.updates && state.service) {
+      renderUpdates(state.service, sessionStorage.getItem("updates.profile") || "web", sessionStorage.getItem("updates.timeout") || "30");
+    }
     if (job.status && !["running", "idle"].includes(job.status)) {
       toast(job.status === "succeeded" ? "升级完成" : "升级结束，请查看进度日志", job.status === "succeeded" ? "ok" : "err");
-      if (state.route === "/updates") loadUpdates(true).catch((error) => toast(error.message, "err"));
+      if (state.route === target) loadUpdates(true).catch((error) => toast(error.message, "err"));
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));

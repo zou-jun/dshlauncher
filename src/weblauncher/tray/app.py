@@ -63,6 +63,7 @@ def console_settings(runtime: Runtime) -> SimpleNamespace:
         ozone=runtime.config.ui.ozone,
         dedupe=True,
         single_window=single,
+        daily_profile=runtime.config.ui.daily_profile,
         profile_dir=runtime.paths.tabbed_profile if single else runtime.paths.control_profile,
         window_kwargs=runtime.config.ui.window.kwargs,
     )
